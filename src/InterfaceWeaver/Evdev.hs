@@ -28,7 +28,7 @@ deviceSource path grab = do
 deviceSink :: String -> Events Evdev.EventData -> IO ()
 deviceSink name events = do
   virtDev <- virtualDevice name
-  Events.sink events $ Uinput.writeEvent virtDev
+  Events.sink (Uinput.writeEvent virtDev) events
 
 virtualDevice :: String -> IO Uinput.Device
 virtualDevice name =

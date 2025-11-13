@@ -1,7 +1,10 @@
-module Test.Main (main) where
+module Test.Main where
 
-import qualified Test.InterfaceWeaver.Events
+import qualified Test.Data.Events
+import qualified Test.Data.Union
+import Test.Hspec
 
 main :: IO ()
-main = do
-  Test.InterfaceWeaver.Events.main
+main = hspec $ do
+  Test.Data.Events.spec
+  Test.Data.Union.spec

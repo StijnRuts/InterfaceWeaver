@@ -1,11 +1,15 @@
+{-# LANGUAGE DataKinds #-}
+
 module Config (main) where
 
 {- HLint ignore "Redundant <&>" -}
+{- HLint ignore "Functor law" -}
 
+import Data.Events
 import Data.Functor ((<&>))
+import Data.Union
 import qualified Evdev.Codes as Codes
 import InterfaceWeaver.Evdev
-import InterfaceWeaver.Events
 import InterfaceWeaver.Keyboard
 
 -- p520_keyboard = "dev/input/by-id/usb-Dell_Dell_USB_Entry_Keyboard-event-kbd"
@@ -18,11 +22,20 @@ import InterfaceWeaver.Keyboard
 t420_keyboard :: String
 t420_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
 
+t420_trackpoint :: String
+t420_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+
 main :: IO ()
 main = do
   deviceSource t420_keyboard True
+    <&> relax
     <&> mapKeyCodes swapAZ
+    <&> specialize
     >>= deviceSink "interfaceweaver"
+
+  deviceSource t420_trackpoint False
+    >>= sink print
+
   keepAlive
 
 swapAZ :: Codes.Key -> Codes.Key
