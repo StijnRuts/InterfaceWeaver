@@ -1,8 +1,7 @@
 {-# LANGUAGE DataKinds #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Test.Data.Union where
-
-{- HLint ignore "Orphan class instance" -}
 
 import Data.Union
 import Test.Hspec

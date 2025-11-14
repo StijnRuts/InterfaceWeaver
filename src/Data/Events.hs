@@ -4,9 +4,9 @@ module Data.Events where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forever)
-import qualified Control.Monad
-import qualified Data.Foldable as Foldable
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
+import qualified Data.List as List
+import Data.Maybe (maybeToList)
 import Data.Union (Member, Union (..), inject, project)
 
 newtype Events a = Events ((a -> IO ()) -> IO ())
@@ -28,10 +28,16 @@ sink f (Events register) = do
 keepAlive :: IO ()
 keepAlive = forever $ threadDelay maxBound
 
+bindEvent :: (a -> IO [b]) -> Events a -> Events b
+bindEvent f (Events register) =
+  Events $ \callback ->
+    register $ \a -> do
+      bs <- f a
+      mapM_ callback bs
+
 instance Functor Events where
   fmap :: (a -> b) -> Events a -> Events b
-  fmap f (Events registerA) = Events $ \callbackB -> do
-    registerA $ \a -> callbackB $ f a
+  fmap f = bindEvent $ pure . List.singleton . f
 
 instance Semigroup (Events a) where
   (<>) :: Events a -> Events a -> Events a
@@ -44,16 +50,13 @@ instance Monoid (Events a) where
   mempty = Events $ \_ -> return ()
 
 flatten :: Events [a] -> Events a
-flatten (Events register) = Events $ \callback -> do
-  register $ \as -> Foldable.forM_ as callback
+flatten = bindEvent pure
 
 filterPredicate :: (a -> Bool) -> Events a -> Events a
-filterPredicate predicate (Events register) = Events $ \callback -> do
-  register $ \a -> Control.Monad.when (predicate a) $ callback a
+filterPredicate predicate = bindEvent $ \a -> if predicate a then pure [a] else pure []
 
 filterMap :: (a -> Maybe b) -> Events a -> Events b
-filterMap f (Events registerA) = Events $ \callbackB -> do
-  registerA $ \a -> Foldable.forM_ (f a) callbackB
+filterMap f = bindEvent $ pure . maybeToList . f
 
 relax :: Events a -> Events (Union '[a])
 relax events = inject <$> events
