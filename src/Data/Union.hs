@@ -14,7 +14,7 @@ class ShowUnion (r :: [Type]) where
 
 instance {-# OVERLAPPING #-} (Show t) => ShowUnion (t ': '[]) where
   showUnion (This t) = show t
-  showUnion (That r) = undefined
+  showUnion (That _) = undefined
 
 instance {-# OVERLAPPABLE #-} (Show t, ShowUnion r) => ShowUnion (t ': r) where
   showUnion (This t) = show t

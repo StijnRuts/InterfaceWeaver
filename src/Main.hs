@@ -1,17 +1,17 @@
 module Main (main) where
 
 import qualified Config
-import qualified InterfaceWeaver.Evdev as Evdev
+import qualified InterfaceWeaver.Internal as Internal
 import System.Environment (getArgs)
 
 main :: IO ()
 main = do
   args <- getArgs
   case args of
-    ["ls"] -> Evdev.listDevices
-    ["list"] -> Evdev.listDevices
+    ["ls"] -> Internal.listDevices
+    ["list"] -> Internal.listDevices
     ["inspect"] -> putStrLn "Usage: Provide a device path such as /dev/input/eventX"
-    ["inspect", devicePath] -> Evdev.inspectDevice devicePath
+    ["inspect", devicePath] -> Internal.inspectDevice devicePath
     ["run"] -> Config.main
     [] -> Config.main
     ["-h"] -> putStrLn helpMessage
@@ -22,4 +22,4 @@ main = do
       putStrLn helpMessage
 
 helpMessage :: String
-helpMessage = "help message"
+helpMessage = "TODO help message"

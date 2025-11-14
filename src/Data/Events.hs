@@ -39,6 +39,10 @@ instance Semigroup (Events a) where
     register1 callback
     register2 callback
 
+instance Monoid (Events a) where
+  mempty :: Events a
+  mempty = Events $ \_ -> return ()
+
 flatten :: Events [a] -> Events a
 flatten (Events register) = Events $ \callback -> do
   register $ \as -> Foldable.forM_ as callback

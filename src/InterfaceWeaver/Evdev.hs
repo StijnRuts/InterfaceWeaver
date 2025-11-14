@@ -1,29 +1,28 @@
-module InterfaceWeaver.Evdev where
+module InterfaceWeaver.Evdev (deviceSource, deviceSink) where
 
 import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (forever, when)
 import qualified Data.ByteString.Char8 as BS
+import Data.Events (Events)
+import qualified Data.Events as Events
 import qualified Evdev
 import qualified Evdev.Codes as Codes
 import qualified Evdev.Uinput as Uinput
-import InterfaceWeaver.Events (Events)
-import qualified InterfaceWeaver.Events as Events
-
-listDevices :: IO ()
-listDevices = putStrLn "listDevices"
-
-inspectDevice :: String -> IO ()
-inspectDevice path = putStrLn $ "inspectDevice " <> path
 
 deviceSource :: String -> Bool -> IO (Events Evdev.EventData)
 deviceSource path grab = do
-  device <- Evdev.newDevice $ BS.pack path
-  when grab $ Evdev.grabDevice device
-  (events, push) <- Events.source
-  _ <- forkIO $ forever $ do
-    (Evdev.Event eventData _) <- Evdev.nextEvent device
-    push eventData
-  return events
+  eitherDevice <- try $ Evdev.newDevice $ BS.pack path
+  case eitherDevice of
+    Left (_ :: SomeException) -> do
+      fail $ "Could not read device " <> path <> ", maybe try sudo"
+    Right device -> do
+      when grab $ Evdev.grabDevice device
+      (events, push) <- Events.source
+      _ <- forkIO $ forever $ do
+        (Evdev.Event eventData _) <- Evdev.nextEvent device
+        push eventData
+      return events
 
 deviceSink :: String -> Events Evdev.EventData -> IO ()
 deviceSink name events = do
@@ -31,10 +30,17 @@ deviceSink name events = do
   Events.sink (Uinput.writeEvent virtDev) events
 
 virtualDevice :: String -> IO Uinput.Device
-virtualDevice name =
-  Uinput.newDevice
-    (BS.pack name)
-    Uinput.defaultDeviceOpts {Uinput.keys = allKeys}
+virtualDevice name = do
+  eitherDevice <-
+    try $
+      Uinput.newDevice
+        (BS.pack name)
+        Uinput.defaultDeviceOpts {Uinput.keys = allKeys}
+  case eitherDevice of
+    Left (_ :: SomeException) -> do
+      fail $ "Could not create device " <> name <> ", maybe try sudo"
+    Right device -> do
+      return device
 
 allKeys :: [Codes.Key]
 allKeys =

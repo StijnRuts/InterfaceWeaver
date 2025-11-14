@@ -7,7 +7,6 @@ module Config (main) where
 
 import Data.Events
 import Data.Functor ((<&>))
-import Data.Union
 import qualified Evdev.Codes as Codes
 import InterfaceWeaver.Evdev
 import InterfaceWeaver.Keyboard
@@ -18,6 +17,10 @@ import InterfaceWeaver.Keyboard
 -- t420_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
 -- t420_trackpad = "/dev/input/by-path/platform-i8042-serio-1-event-mouse"
 -- t420_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+-- x201_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+-- x201_trackpad = "/dev/input/by-path/platform-i8042-serio-1-event-mouse"
+-- x201_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+-- x201_mouse = "/dev/input/by-id/usb-Logitech_USB_Receiver-if02-event-mouse"
 
 t420_keyboard :: String
 t420_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"

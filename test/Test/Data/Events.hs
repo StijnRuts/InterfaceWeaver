@@ -33,14 +33,26 @@ spec = do
       push2 "second"
       await `shouldReturn` ["second"]
 
+  describe "Events Monoid instance" $ do
+    it "should ignore mempty events" $ do
+      (events, push) <- source
+      {- HLint ignore "Monoid law, left identity" -}
+      {- HLint ignore "Monoid law, right identity" -}
+      let mergedEvents = mempty <> events <> mempty
+      await <- capture mergedEvents
+      push "first"
+      await `shouldReturn` ["first"]
+      push "second"
+      await `shouldReturn` ["second"]
+
   describe "Events flattening" $ do
     it "should flatten lists" $ do
       (events, push) <- source
       let flattenedEvents = flatten events
       await <- capture flattenedEvents
-      push [1, 2, 3]
-      push [4, 5, 6]
-      await `shouldReturn` [1, 2, 3, 4, 5, 6]
+      push ["a", "b"]
+      push ["c", "d"]
+      await `shouldReturn` ["a", "b", "c", "d"]
 
   describe "Events filtering" $ do
     it "should allow only values that satisfy the predicate" $ do
