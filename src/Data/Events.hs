@@ -2,14 +2,14 @@
 
 module Data.Events where
 
-import Control.Concurrent (threadDelay)
-import Control.Monad (forever)
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
 import Data.Maybe (maybeToList)
 import Data.Union (Member, Union (..), inject, project)
 
 newtype Events a = Events ((a -> IO ()) -> IO ())
+
+-- Sourcing and sinking events
 
 source :: IO (Events a, a -> IO ())
 source = do
@@ -25,8 +25,7 @@ sink :: (a -> IO ()) -> Events a -> IO ()
 sink f (Events register) = do
   register f
 
-keepAlive :: IO ()
-keepAlive = forever $ threadDelay maxBound
+-- Transforming Events
 
 bindEvent :: (a -> IO [b]) -> Events a -> Events b
 bindEvent f (Events register) =
@@ -58,9 +57,17 @@ filterPredicate predicate = bindEvent $ \a -> if predicate a then pure [a] else 
 filterMap :: (a -> Maybe b) -> Events a -> Events b
 filterMap f = bindEvent $ pure . maybeToList . f
 
-relax :: Events a -> Events (Union '[a])
+-- Events of Union types
+
+relax :: (Member a u) => Events a -> Events (Union u)
 relax events = inject <$> events
 
 specialize :: (Member a u) => Events (Union u) -> Events a
 specialize = filterMap project
+
+relaxF :: (Member a u, Member b v) => (Events a -> Events b) -> Events (Union u) -> Events (Union v)
+relaxF f = relax . f . specialize
+
+specializeF :: (Member a u, Member b v) => (Events (Union u) -> Events (Union v)) -> Events a -> Events b
+specializeF f = specialize . f . relax
 

@@ -6,13 +6,13 @@ import Control.Category ((>>>))
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
 import qualified Data.ByteString.Char8 as BS
-import Data.Events (keepAlive)
 import qualified Data.Events as Events
 import Data.Functor ((<&>))
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Evdev
 import qualified Evdev.Codes as Codes
+import InterfaceWeaver.App (interfaceWeaver, run)
 import qualified InterfaceWeaver.Evdev as Evdev
 import System.Directory (canonicalizePath, doesFileExist, getSymbolicLinkTarget, listDirectory, pathIsSymbolicLink)
 import System.FilePath (takeDirectory, (</>))
@@ -50,10 +50,9 @@ listDevices =
               pure [(targetPath, path)]
 
 inspectDevice :: FilePath -> IO ()
-inspectDevice path = do
-  printDeviceInfo path
-  Evdev.deviceSource path False >>= Events.sink print
-  keepAlive
+inspectDevice path = interfaceWeaver $ do
+  run $ printDeviceInfo path
+  run $ Evdev.deviceSource path False >>= Events.sink print
 
 printDeviceInfo :: FilePath -> IO ()
 printDeviceInfo path = do

@@ -7,7 +7,9 @@ module Config (main) where
 
 import Data.Events
 import Data.Functor ((<&>))
+import qualified Evdev
 import qualified Evdev.Codes as Codes
+import InterfaceWeaver.App
 import InterfaceWeaver.Evdev
 import InterfaceWeaver.Keyboard
 
@@ -22,24 +24,24 @@ import InterfaceWeaver.Keyboard
 -- x201_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
 -- x201_mouse = "/dev/input/by-id/usb-Logitech_USB_Receiver-if02-event-mouse"
 
-t420_keyboard :: String
-t420_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+x201_keyboard :: String
+x201_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
 
-t420_trackpoint :: String
-t420_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+x201_trackpoint :: String
+x201_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
 
 main :: IO ()
-main = do
-  deviceSource t420_keyboard True
-    <&> relax
-    <&> mapKeyCodes swapAZ
-    <&> specialize
-    >>= deviceSink "interfaceweaver"
+main = interfaceWeaver $ do
+  onShutdown $ putStrLn "SHUTDOWN"
 
-  deviceSource t420_trackpoint False
-    >>= sink print
+  run $
+    deviceSource x201_keyboard True
+      <&> mapKeyCodes swapAZ
+      >>= deviceSink "interfaceweaver"
 
-  keepAlive
+  run $
+    deviceSource x201_trackpoint False
+      >>= sink print
 
 swapAZ :: Codes.Key -> Codes.Key
 swapAZ Codes.KeyA = Codes.KeyZ
