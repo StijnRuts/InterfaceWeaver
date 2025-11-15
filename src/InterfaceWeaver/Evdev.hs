@@ -42,6 +42,23 @@ virtualDevice name = do
     Right device -> do
       return device
 
+{-
+DeviceOpts
+keys :: [Key]
+relAxes :: [RelativeAxis]
+absAxes :: [(AbsoluteAxis, AbsInfo)]
+miscs :: [MiscEvent]
+switchs :: [SwitchEvent]
+leds :: [LEDEvent]
+sounds :: [SoundEvent]
+reps :: [(RepeatEvent, Int)]
+ffs :: [EventCode]
+powers :: [EventCode]
+ffStats :: [EventCode]
+-}
+
+-- TODO: separate based on device type
+-- keyboard, mouse, gamepad, drawing tablet, ...
 allKeys :: [Codes.Key]
 allKeys =
   [ Codes.KeyReserved,

@@ -1,7 +1,9 @@
 module Test.Data.Events where
 
 import Control.Concurrent.MVar (modifyMVar_, newMVar, swapMVar)
+import Control.Monad (forM_)
 import Data.Events
+import InterfaceWeaver.App
 import Test.Hspec
 
 spec :: Spec
@@ -74,6 +76,43 @@ spec = do
       push (5 :: Int)
       push (6 :: Int)
       await `shouldReturn` [8, 12]
+
+  describe "Events with state" $ do
+    let runStateTests configs = interfaceWeaverTest $ do
+          forM_ configs $ \(update, pushes, expected, endstate) -> do
+            statefull <-
+              withStateIO
+                (pure (0 :: Int))
+                (`shouldBe` endstate)
+                update
+            (events, push) <- run source
+            let statefullEvents = statefull events
+            await <- run $ capture statefullEvents
+            mapM_ (run . push) pushes
+            run $ await `shouldReturn` expected
+
+    it "should keep track of state" $
+      runStateTests
+        [ ( \(a, s) -> (s + a, s + a),
+            [1, 2, 3],
+            [1, 3, 6],
+            6
+          )
+        ]
+
+    it "should keep track of separate states" $
+      runStateTests
+        [ ( \(a, s) -> (a, s + 1),
+            [1],
+            [1],
+            1
+          ),
+          ( \(a, s) -> (a, s + 1),
+            [2, 3],
+            [2, 3],
+            2
+          )
+        ]
 
 capture :: Events a -> IO (IO [a])
 capture events = do

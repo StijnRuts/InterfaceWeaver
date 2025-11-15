@@ -2,10 +2,14 @@
 
 module Data.Events where
 
-import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Control.Exception (evaluate)
+import Control.Monad.State (State, runState)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
 import Data.Maybe (maybeToList)
 import Data.Union (Member, Union (..), inject, project)
+import InterfaceWeaver.App
+import System.Directory (doesFileExist)
 
 newtype Events a = Events ((a -> IO ()) -> IO ())
 
@@ -70,4 +74,38 @@ relaxF f = relax . f . specialize
 
 specializeF :: (Member a u, Member b v) => (Events (Union u) -> Events (Union v)) -> Events a -> Events b
 specializeF f = specialize . f . relax
+
+-- State
+
+withStateIO :: IO s -> (s -> IO ()) -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
+withStateIO load save f = do
+  ref <- run $ newIORef =<< load
+  onShutdown $ readIORef ref >>= save
+  return $ bindEvent $ toIO ref
+  where
+    toIO ref a = do
+      s <- readIORef ref
+      let (b, s') = f (a, s)
+      writeIORef ref s'
+      return [b]
+
+withState :: s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
+withState initial = withStateIO (return initial) (\_ -> return ())
+
+withPersistentState :: (Read s, Show s) => FilePath -> s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
+withPersistentState path initial = withStateIO load save
+  where
+    load = do
+      exists <- doesFileExist path
+      if exists
+        then evaluate . read =<< readFile path
+        else return initial
+    save s = writeFile path $ show s
+
+
+withStateM :: s -> (a -> State s b) -> App (Events a -> Events b)
+withStateM initial f = withState initial $ \(a, s) -> runState (f a) s
+
+withPersistentStateM :: (Read s, Show s) => FilePath -> s -> (a -> State s b) -> App (Events a -> Events b)
+withPersistentStateM path initial f = withPersistentState path initial $ \(a, s) -> runState (f a) s
 

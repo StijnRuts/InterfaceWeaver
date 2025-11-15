@@ -12,7 +12,7 @@ newtype App a = App {runApp :: WriterT (IO ()) IO a}
 onShutdown :: IO () -> App ()
 onShutdown = tell
 
-run :: IO () -> App ()
+run :: IO a -> App a
 run = App . liftIO
 
 interfaceWeaver :: App () -> IO ()
@@ -21,3 +21,10 @@ interfaceWeaver app =
     (execWriterT (runApp app))
     id
     (\_ -> forever $ threadDelay maxBound)
+
+interfaceWeaverTest :: App () -> IO ()
+interfaceWeaverTest app =
+  bracket
+    (execWriterT (runApp app))
+    id
+    (\_ -> return ())

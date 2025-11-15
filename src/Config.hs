@@ -32,11 +32,12 @@ x201_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
 
 main :: IO ()
 main = interfaceWeaver $ do
-  onShutdown $ putStrLn "SHUTDOWN"
+  countState <- withPersistentState "/home/stijn/state.txt" 0 countA
 
   run $
     deviceSource x201_keyboard True
       <&> mapKeyCodes swapAZ
+      <&> countState
       >>= deviceSink "interfaceweaver"
 
   run $
@@ -47,3 +48,7 @@ swapAZ :: Codes.Key -> Codes.Key
 swapAZ Codes.KeyA = Codes.KeyZ
 swapAZ Codes.KeyZ = Codes.KeyA
 swapAZ kc = kc
+
+countA :: (Evdev.EventData, Int) -> (Evdev.EventData, Int)
+countA (event@(Evdev.KeyEvent Codes.KeyA _), state) = (event, state + 1)
+countA (event, state) = (event, state)
