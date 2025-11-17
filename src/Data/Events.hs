@@ -4,7 +4,7 @@ module Data.Events where
 
 import Control.Exception (evaluate)
 import Control.Monad.State (State, runState)
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
 import Data.Maybe (maybeToList)
 import Data.Union (Member, Union (..), inject, project)
@@ -75,7 +75,7 @@ relaxF f = relax . f . specialize
 specializeF :: (Member a u, Member b v) => (Events (Union u) -> Events (Union v)) -> Events a -> Events b
 specializeF f = specialize . f . relax
 
--- State
+-- State-based Events
 
 withStateIO :: IO s -> (s -> IO ()) -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
 withStateIO load save f = do
@@ -108,4 +108,10 @@ withStateM initial f = withState initial $ \(a, s) -> runState (f a) s
 
 withPersistentStateM :: (Read s, Show s) => FilePath -> s -> (a -> State s b) -> App (Events a -> Events b)
 withPersistentStateM path initial f = withPersistentState path initial $ \(a, s) -> runState (f a) s
+
+removeRepeats :: (Eq a) => App (Events a -> Events a)
+removeRepeats = (flatten .) <$> withState Nothing update
+  where
+    update (a, Nothing) = ([a], Just a)
+    update (a, Just prev) = if a /= prev then ([a], Just a) else ([], Just a)
 
