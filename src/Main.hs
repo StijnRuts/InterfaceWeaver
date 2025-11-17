@@ -1,25 +1,55 @@
+{-# LANGUAGE DataKinds #-}
+
 module Main (main) where
 
-import qualified Config
-import qualified InterfaceWeaver.Internal as Internal
-import System.Environment (getArgs)
+{- HLint ignore "Redundant <&>" -}
+{- HLint ignore "Functor law" -}
+
+import Data.Events
+import Data.Functor ((<&>))
+import qualified Evdev
+import qualified Evdev.Codes as Codes
+import InterfaceWeaver.App
+import InterfaceWeaver.Evdev
+import InterfaceWeaver.Internal
+import InterfaceWeaver.Keyboard
+
+-- p520_keyboard = "dev/input/by-id/usb-Dell_Dell_USB_Entry_Keyboard-event-kbd"
+-- p520_trackpad = "/dev/input/by-id/usb-Apple_Inc._Magic_Trackpad_2_CC2101201T7J2Y1AA-event-mouse"
+-- p520_mouse = "/dev/input/by-id/usb-Logitech_USB_Laser_Mouse-event-mouse"
+-- t420_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+-- t420_trackpad = "/dev/input/by-path/platform-i8042-serio-1-event-mouse"
+-- t420_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+-- x201_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+-- x201_trackpad = "/dev/input/by-path/platform-i8042-serio-1-event-mouse"
+-- x201_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+-- x201_mouse = "/dev/input/by-id/usb-Logitech_USB_Receiver-if02-event-mouse"
+
+x201_keyboard :: String
+x201_keyboard = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+
+x201_trackpoint :: String
+x201_trackpoint = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
 
 main :: IO ()
-main = do
-  args <- getArgs
-  case args of
-    ["ls"] -> Internal.listDevices
-    ["list"] -> Internal.listDevices
-    ["inspect"] -> putStrLn "Usage: Provide a device path such as /dev/input/eventX"
-    ["inspect", devicePath] -> Internal.inspectDevice devicePath
-    ["run"] -> Config.main
-    [] -> Config.main
-    ["-h"] -> putStrLn helpMessage
-    ["help"] -> putStrLn helpMessage
-    ["--help"] -> putStrLn helpMessage
-    options -> do
-      putStrLn $ "Unrecognized option " <> show options
-      putStrLn helpMessage
+main = interfaceWeaver $ do
+  countState <- withPersistentState "/home/stijn/state.txt" 0 countA
 
-helpMessage :: String
-helpMessage = "TODO help message"
+  run $
+    deviceSource x201_keyboard True
+      <&> mapKeyCodes swapAZ
+      <&> countState
+      >>= deviceSink "interfaceweaver"
+
+  run $
+    deviceSource x201_trackpoint False
+      >>= sink print
+
+swapAZ :: Codes.Key -> Codes.Key
+swapAZ Codes.KeyA = Codes.KeyZ
+swapAZ Codes.KeyZ = Codes.KeyA
+swapAZ kc = kc
+
+countA :: (Evdev.EventData, Int) -> (Evdev.EventData, Int)
+countA (event@(Evdev.KeyEvent Codes.KeyA _), state) = (event, state + 1)
+countA (event, state) = (event, state)

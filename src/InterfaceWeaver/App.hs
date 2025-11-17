@@ -6,7 +6,7 @@ import Control.Monad (forever)
 import Control.Monad.IO.Class
 import Control.Monad.Writer
 
-newtype App a = App {runApp :: WriterT (IO ()) IO a}
+newtype App a = App {appWriter :: WriterT (IO ()) IO a}
   deriving (Functor, Applicative, Monad, MonadIO, MonadWriter (IO ()))
 
 onShutdown :: IO () -> App ()
@@ -15,16 +15,16 @@ onShutdown = tell
 run :: IO a -> App a
 run = App . liftIO
 
-interfaceWeaver :: App () -> IO ()
-interfaceWeaver app =
+runApp :: App () -> IO ()
+runApp app =
   bracket
-    (execWriterT (runApp app))
+    (execWriterT (appWriter app))
     id
     (\_ -> forever $ threadDelay maxBound)
 
-interfaceWeaverTest :: App () -> IO ()
-interfaceWeaverTest app =
+runAppTest :: App () -> IO ()
+runAppTest app =
   bracket
-    (execWriterT (runApp app))
+    (execWriterT (appWriter app))
     id
     (\_ -> return ())

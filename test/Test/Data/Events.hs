@@ -78,7 +78,7 @@ spec = do
       await `shouldReturn` [8, 12]
 
   describe "Events with state" $ do
-    let runStateTests configs = interfaceWeaverTest $ do
+    let runStateTests configs = runAppTest $ do
           forM_ configs $ \(update, pushes, expected, endstate) -> do
             statefull <-
               withStateIO
@@ -114,7 +114,7 @@ spec = do
           )
         ]
 
-    it "should remove repeats" $ interfaceWeaverTest $ do
+    it "should remove repeats" $ runAppTest $ do
       rm <- removeRepeats
       (events, push) <- run source
       let rmEvents = rm events

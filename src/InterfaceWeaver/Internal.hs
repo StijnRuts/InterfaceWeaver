@@ -12,11 +12,32 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Evdev
 import qualified Evdev.Codes as Codes
-import InterfaceWeaver.App (interfaceWeaver, run)
+import InterfaceWeaver.App (App, run, runApp)
 import qualified InterfaceWeaver.Evdev as Evdev
 import System.Directory (canonicalizePath, doesFileExist, getSymbolicLinkTarget, listDirectory, pathIsSymbolicLink)
+import System.Environment (getArgs)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
+
+interfaceWeaver :: App () -> IO ()
+interfaceWeaver app = do
+  args <- getArgs
+  case args of
+    ["ls"] -> listDevices
+    ["list"] -> listDevices
+    ["inspect"] -> putStrLn "Usage: Provide a device path such as /dev/input/eventX"
+    ["inspect", devicePath] -> inspectDevice devicePath
+    ["run"] -> runApp app
+    [] -> runApp app
+    ["-h"] -> putStrLn helpMessage
+    ["help"] -> putStrLn helpMessage
+    ["--help"] -> putStrLn helpMessage
+    options -> do
+      putStrLn $ "Unrecognized option " <> show options
+      putStrLn helpMessage
+
+helpMessage :: String
+helpMessage = "TODO help message"
 
 listDevices :: IO ()
 listDevices =
@@ -50,7 +71,7 @@ listDevices =
               pure [(targetPath, path)]
 
 inspectDevice :: FilePath -> IO ()
-inspectDevice path = interfaceWeaver $ do
+inspectDevice path = runApp $ do
   run $ printDeviceInfo path
   run $ Evdev.deviceSource path False >>= Events.sink print
 
