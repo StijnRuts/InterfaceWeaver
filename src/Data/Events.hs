@@ -26,8 +26,7 @@ source = do
   return (events, push)
 
 sink :: (a -> IO ()) -> Events a -> IO ()
-sink f (Events register) = do
-  register f
+sink f (Events register) = register f
 
 -- Transforming Events
 
@@ -110,8 +109,5 @@ withPersistentStateM :: (Read s, Show s) => FilePath -> s -> (a -> State s b) ->
 withPersistentStateM path initial f = withPersistentState path initial $ \(a, s) -> runState (f a) s
 
 removeRepeats :: (Eq a) => App (Events a -> Events a)
-removeRepeats = (flatten .) <$> withState Nothing update
-  where
-    update (a, Nothing) = ([a], Just a)
-    update (a, Just prev) = if a /= prev then ([a], Just a) else ([], Just a)
+removeRepeats = (flatten .) <$> withState Nothing (\(a, prev) -> ([a | prev /= Just a], Just a))
 

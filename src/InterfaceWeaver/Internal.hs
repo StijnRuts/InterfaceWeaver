@@ -1,4 +1,4 @@
-module InterfaceWeaver.Internal where
+module InterfaceWeaver.Internal (interfaceWeaver) where
 
 {- HLint ignore "Redundant <&>" -}
 
@@ -96,26 +96,26 @@ printDeviceInfo path = do
         putStrLn "  Events:"
         mapM_ (putStrLn . (\p -> "    - " ++ showEventType p)) filteredEventTypes
       putStrLn ""
-  where
-    showProperty :: Codes.DeviceProperty -> String
-    showProperty Codes.InputPropPointer = "Pointer"
-    showProperty Codes.InputPropDirect = "Direct"
-    showProperty Codes.InputPropButtonpad = "Buttonpad"
-    showProperty Codes.InputPropSemiMt = "Semi-multitouch"
-    showProperty Codes.InputPropTopbuttonpad = "Topbuttonpad"
-    showProperty Codes.InputPropPointingStick = "Pointing stick"
-    showProperty Codes.InputPropAccelerometer = "Accelerometer"
 
-    showEventType :: Codes.EventType -> String
-    showEventType Codes.EvSyn = "Sync"
-    showEventType Codes.EvKey = "Key"
-    showEventType Codes.EvRel = "Relative Movement"
-    showEventType Codes.EvAbs = "Absolute Movement"
-    showEventType Codes.EvMsc = "Misc"
-    showEventType Codes.EvSw = "Switch"
-    showEventType Codes.EvLed = "LED"
-    showEventType Codes.EvSnd = "Sound"
-    showEventType Codes.EvRep = "Repeat"
-    showEventType Codes.EvFf = "Force Feedback"
-    showEventType Codes.EvFfStatus = "Force Feedback Status"
-    showEventType Codes.EvPwr = "Power"
+showProperty :: Codes.DeviceProperty -> String
+showProperty Codes.InputPropPointer = "Pointer"
+showProperty Codes.InputPropDirect = "Direct"
+showProperty Codes.InputPropButtonpad = "Buttonpad"
+showProperty Codes.InputPropSemiMt = "Semi-multitouch"
+showProperty Codes.InputPropTopbuttonpad = "Topbuttonpad"
+showProperty Codes.InputPropPointingStick = "Pointing stick"
+showProperty Codes.InputPropAccelerometer = "Accelerometer"
+
+showEventType :: Codes.EventType -> String
+showEventType Codes.EvSyn = "Sync"
+showEventType Codes.EvKey = "Key"
+showEventType Codes.EvRel = "Relative Movement"
+showEventType Codes.EvAbs = "Absolute Movement"
+showEventType Codes.EvMsc = "Misc"
+showEventType Codes.EvSw = "Switch"
+showEventType Codes.EvLed = "LED"
+showEventType Codes.EvSnd = "Sound"
+showEventType Codes.EvRep = "Repeat"
+showEventType Codes.EvFf = "Force Feedback"
+showEventType Codes.EvFfStatus = "Force Feedback Status"
+showEventType Codes.EvPwr = "Power"
