@@ -4,12 +4,14 @@ module Data.Events where
 
 import Control.Exception (evaluate)
 import Control.Monad.State (State, runState)
+import Data.Aeson (FromJSON, ToJSON)
+import qualified Data.Aeson as JSON
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
-import Data.Maybe (maybeToList)
+import Data.Maybe (fromMaybe, maybeToList)
 import Data.Union (Member, Union (..), inject, project)
-import InterfaceWeaver.App
-import System.Directory (doesFileExist)
+import InterfaceWeaver.App (App, onShutdown, run)
+import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 
 newtype Events a = Events ((a -> IO ()) -> IO ())
 
@@ -80,32 +82,36 @@ withStateIO :: IO s -> (s -> IO ()) -> ((a, s) -> (b, s)) -> App (Events a -> Ev
 withStateIO load save f = do
   ref <- run $ newIORef =<< load
   onShutdown $ readIORef ref >>= save
-  return $ bindEvent $ toIO ref
-  where
-    toIO ref a = do
-      s <- readIORef ref
-      let (b, s') = f (a, s)
-      writeIORef ref s'
-      return [b]
+  return $ bindEvent $ \a -> do
+    s <- readIORef ref
+    let (b, s') = f (a, s)
+    writeIORef ref s'
+    return [b]
 
 withState :: s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
 withState initial = withStateIO (return initial) (\_ -> return ())
 
-withPersistentState :: (Read s, Show s) => FilePath -> s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
-withPersistentState path initial = withStateIO load save
+withPersistentState :: (FromJSON s, ToJSON s) => FilePath -> s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
+withPersistentState filename initial = withStateIO load save
   where
     load = do
-      exists <- doesFileExist path
+      fullPath <- withBaseDir
+      exists <- doesFileExist fullPath
       if exists
-        then evaluate . read =<< readFile path
+        then fromMaybe initial <$> JSON.decodeFileStrict fullPath
         else return initial
-    save s = writeFile path $ show s
-
+    save s = do
+      fullPath <- withBaseDir
+      JSON.encodeFile fullPath s
+    withBaseDir = do
+      dir <- getXdgDirectory XdgState "InputWeaver"
+      createDirectoryIfMissing True dir
+      return $ dir <> "/" <> filename <> ".json"
 
 withStateM :: s -> (a -> State s b) -> App (Events a -> Events b)
 withStateM initial f = withState initial $ \(a, s) -> runState (f a) s
 
-withPersistentStateM :: (Read s, Show s) => FilePath -> s -> (a -> State s b) -> App (Events a -> Events b)
+withPersistentStateM :: (FromJSON s, ToJSON s) => FilePath -> s -> (a -> State s b) -> App (Events a -> Events b)
 withPersistentStateM path initial f = withPersistentState path initial $ \(a, s) -> runState (f a) s
 
 removeRepeats :: (Eq a) => App (Events a -> Events a)

@@ -3,6 +3,7 @@
   languages.haskell = {
     enable = true;
     package = pkgs.haskell.packages.ghc9103.ghcWithPackages (ps: with ps; [
+      aeson
       evdev
       hspec
       QuickCheck
