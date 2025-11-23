@@ -62,6 +62,52 @@ filterPredicate predicate = bindEvent $ \a -> if predicate a then pure [a] else 
 filterMap :: (a -> Maybe b) -> Events a -> Events b
 filterMap f = bindEvent $ pure . maybeToList . f
 
+-- Parallel Events streams
+
+partition :: (a -> Bool) -> Events a -> Events (Either a a)
+partition predicate = fmap $ \a -> if predicate a then Right a else Left a
+
+unpartition :: Events (Either a a) -> Events a
+unpartition = fmap f
+  where
+    f (Left a) = a
+    f (Right a) = a
+
+partition' :: (a -> Bool) -> Events a -> (Events a, Events a)
+partition' = (split .) . partition
+
+unpartition' :: (Events a, Events a) -> Events a
+unpartition' (events1, events2) = events1 <> events2
+
+split :: Events (Either a b) -> (Events a, Events b)
+split events = (filterMap leftToMaybe events, filterMap rightToMaybe events)
+  where
+    leftToMaybe (Left l) = Just l
+    leftToMaybe (Right _) = Nothing
+    rightToMaybe (Left _) = Nothing
+    rightToMaybe (Right r) = Just r
+
+join :: (Events a, Events b) -> Events (Either a b)
+join (eventsA, eventsB) = fmap Left eventsA <> fmap Right eventsB
+
+mapLeft :: (a -> c) -> Events (Either a b) -> Events (Either c b)
+mapLeft f = fmap f'
+  where
+    f' (Left a) = Left (f a)
+    f' (Right b) = Right b
+
+mapRight :: (b -> c) -> Events (Either a b) -> Events (Either a c)
+mapRight f = fmap f'
+  where
+    f' (Left a) = Left a
+    f' (Right b) = Right (f b)
+
+mapLeft' :: (Events a -> Events c) -> (Events a, Events b) -> (Events c, Events b)
+mapLeft' f (eventsA, eventsB) = (f eventsA, eventsB)
+
+mapRight' :: (Events b -> Events c) -> (Events a, Events b) -> (Events a, Events c)
+mapRight' f (eventsA, eventsB) = (eventsA, f eventsB)
+
 -- Events of Union types
 
 relax :: (Member a u) => Events a -> Events (Union u)
