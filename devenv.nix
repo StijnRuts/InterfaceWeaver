@@ -6,6 +6,7 @@
       aeson
       evdev
       hspec
+      network-bsd
       QuickCheck
     ]);
   };

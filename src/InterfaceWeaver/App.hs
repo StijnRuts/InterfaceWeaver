@@ -1,7 +1,6 @@
 module InterfaceWeaver.App where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (bracket)
 import Control.Monad (forever)
 import Control.Monad.IO.Class
 import Control.Monad.Writer
@@ -16,15 +15,11 @@ run :: IO a -> App a
 run = App . liftIO
 
 runApp :: App () -> IO ()
-runApp app =
-  bracket
-    (execWriterT (appWriter app))
-    id
-    (\_ -> forever $ threadDelay maxBound)
+runApp app = do
+  _ <- execWriterT $ appWriter app
+  forever $ threadDelay maxBound
 
 runAppTest :: App () -> IO ()
-runAppTest app =
-  bracket
-    (execWriterT (appWriter app))
-    id
-    (\_ -> return ())
+runAppTest app = do
+  _ <- execWriterT $ appWriter app
+  return ()
