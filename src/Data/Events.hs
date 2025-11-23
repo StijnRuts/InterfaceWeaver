@@ -9,7 +9,7 @@ import qualified Data.Aeson as JSON
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
 import Data.Maybe (fromMaybe, maybeToList)
-import Data.Union (Member, Union (..), inject, project)
+import Data.Union
 import InterfaceWeaver.App (App, onShutdown, run)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 
@@ -69,6 +69,9 @@ relax events = inject <$> events
 
 specialize :: (Member a u) => Events (Union u) -> Events a
 specialize = filterMap project
+
+widen :: (Subset u v) => Events (Union u) -> Events (Union v)
+widen = fmap weaken
 
 relaxF :: (Member a u, Member b v) => (Events a -> Events b) -> Events (Union u) -> Events (Union v)
 relaxF f = relax . f . specialize

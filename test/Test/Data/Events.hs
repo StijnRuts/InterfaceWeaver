@@ -61,11 +61,9 @@ spec = do
 
   describe "Events of Union types" $ do
     let lengthOrToUpper :: Union '[String, Char] -> Union '[Int, Char]
-        lengthOrToUpper x =
-          case (project @String x, project @Char x) of
-            (Just str, _) -> inject $ length str
-            (_, Just c) -> inject $ Char.toUpper c
-            _ -> error "Unknown type"
+        lengthOrToUpper =
+          replace (length :: String -> Int)
+            . replace Char.toUpper
 
     it "should handle Events of Unions" $
       runTest
@@ -84,6 +82,12 @@ spec = do
         ([inject 'a', inject True, inject 'b'] :: [Union '[Int, Char, Bool]])
         specialize
         ['a', 'b']
+
+    it "should widen the Events Union" $
+      runTest
+        ([inject 'a', inject True, inject 'b'] :: [Union '[Char, Bool]])
+        widen
+        ([inject 'a', inject True, inject 'b'] :: [Union '[Int, Char, Bool]])
 
     it "should wrap an Events function into Events Unions" $
       runTest

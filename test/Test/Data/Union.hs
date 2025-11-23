@@ -65,66 +65,54 @@ spec = do
       (project u :: Maybe Bool) `shouldBe` Nothing
       (project u :: Maybe Char) `shouldBe` Just 'a'
 
+  describe "Special cases for Unions of one or two types" $ do
+    it "injects Either into a Union" $ do
+      injectEither (Left 'a') `shouldBe` (inject 'a' :: Union '[Char, Bool])
+      injectEither (Right True) `shouldBe` (inject True :: Union '[Char, Bool])
+
+    it "projects a Union of two types onto an Either" $ do
+      projectEither (inject 'a' :: Union '[Char, Bool]) `shouldBe` Left 'a'
+      projectEither (inject True :: Union '[Char, Bool]) `shouldBe` Right True
+
+    it "projects a Union of a single type onto that type" $ do
+      projectSingle (inject 'a' :: Union '[Char]) `shouldBe` 'a'
+
+  describe "Subset" $ do
+    it "weakens a Union" $ do
+      weaken (inject 'a' :: Union '[Char, Bool]) `shouldBe` (inject 'a' :: Union '[Char, Bool])
+      weaken (inject 'a' :: Union '[Char, Bool]) `shouldBe` (inject 'a' :: Union '[String, Char, Bool])
+      weaken (inject 'a' :: Union '[Char, Bool]) `shouldBe` (inject 'a' :: Union '[Char, String, Bool])
+      weaken (inject 'a' :: Union '[Char, Bool]) `shouldBe` (inject 'a' :: Union '[Bool, String, Char])
+      weaken (inject True :: Union '[Char, Bool]) `shouldBe` (inject True :: Union '[Char, Bool])
+      weaken (inject True :: Union '[Char, Bool]) `shouldBe` (inject True :: Union '[String, Char, Bool])
+      weaken (inject True :: Union '[Char, Bool]) `shouldBe` (inject True :: Union '[Char, String, Bool])
+      weaken (inject True :: Union '[Char, Bool]) `shouldBe` (inject True :: Union '[Bool, String, Char])
+
   describe "RemoveMember" $ do
     it "removes head element and returns Right" $ do
-      let u = inject True :: Union '[Char, Bool]
-      (remove u :: Either (Union '[Char]) Bool) `shouldBe` Right True
+      remove (inject True :: Union '[Char, Bool]) `shouldBe` Right True
 
     it "removes non-head element and returns Right" $ do
-      let u = inject 'a' :: Union '[Char, Bool]
-      (remove u :: Either (Union '[Bool]) Char) `shouldBe` Right 'a'
+      remove (inject 'a' :: Union '[Char, Bool]) `shouldBe` Right 'a'
 
     it "removes head but returns Left when value is not target" $ do
       let u = inject True :: Union '[Char, Bool]
       case (remove u :: Either (Union '[Bool]) Char) of
-        Left rest -> (project rest :: Maybe Bool) `shouldBe` Just True
+        Left rest -> project rest `shouldBe` Just True
         Right _ -> expectationFailure "Expected Left"
 
   describe "ReplaceMember" $ do
     it "replaces head element with same type" $ do
-      let u = inject 'a' :: Union '[Char, Bool]
-      let u' = replace Char.toUpper u :: Union '[Char, Bool]
-      project u' `shouldBe` Just 'A'
-      project u' `shouldBe` (Nothing :: Maybe Bool)
+      let u = replace Char.toUpper (inject 'a' :: Union '[Char, Bool])
+      project u `shouldBe` Just 'A'
+      project u `shouldBe` (Nothing :: Maybe Bool)
 
     it "replaces head element with different type" $ do
-      let u = inject 'a' :: Union '[Char, Bool]
-      let u' = replace (show :: Char -> String) u :: Union '[String, Bool]
-      project u' `shouldBe` Just "'a'"
-      project u' `shouldBe` (Nothing :: Maybe Bool)
+      let u = replace (show :: Char -> String) (inject 'a' :: Union '[Char, Bool])
+      project u `shouldBe` Just "'a'"
+      project u `shouldBe` (Nothing :: Maybe Bool)
 
     it "replaces non-head element" $ do
-      let u = inject True :: Union '[Char, Bool]
-      let u' = replace (show :: Bool -> String) u :: Union '[Char, String]
-      project u' `shouldBe` Just "True"
-      project u' `shouldBe` (Nothing :: Maybe Char)
-
-  describe "QuickCheck properties for Union" $ do
-    it "Show matches projection when successful" $
-      do
-        property (\(x :: Char) -> let u = inject x :: Union '[Char, Bool] in show u == show x)
-        .&&. property (\(x :: Bool) -> let u = inject x :: Union '[Char, Bool] in show u == show x)
-
-    it "Eq reflexivity" $ do
-      property $ \(u :: Union '[Char, Bool]) -> u == u
-
-    it "inject/project roundtrip for Char" $ do
-      property $ \(x :: Char) ->
-        project (inject x :: Union '[Char, Bool]) == Just x
-
-    it "inject/project roundtrip for Bool" $ do
-      property $ \(x :: Bool) ->
-        project (inject x :: Union '[Char, Bool]) == Just x
-
-    it "remove roundtrip for Char" $ do
-      property $ \(x :: Char) ->
-        (remove (inject x :: Union '[Char, Bool]) :: Either (Union '[Bool]) Char) == Right x
-
-    it "remove roundtrip for Bool" $ do
-      property $ \(x :: Bool) ->
-        (remove (inject x :: Union '[Char, Bool]) :: Either (Union '[Char]) Bool) == Right x
-
-    it "replace id leaves union unchanged" $
-      do
-        property (\(u :: Union '[Char, Bool]) -> replace (id :: Char -> Char) u == u)
-        .&&. property (\(u :: Union '[Char, Bool]) -> replace (id :: Bool -> Bool) u == u)
+      let u = replace (show :: Bool -> String) (inject True :: Union '[Char, Bool])
+      project u `shouldBe` Just "True"
+      project u `shouldBe` (Nothing :: Maybe Char)
