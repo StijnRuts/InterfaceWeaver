@@ -10,7 +10,7 @@ import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
 import Data.Maybe (fromMaybe, maybeToList)
 import Data.Union
-import InterfaceWeaver.App (App, onShutdown, run)
+import InterfaceWeaver.App (App, liftIO, onShutdown)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 
 newtype Events a = Events ((a -> IO ()) -> IO ())
@@ -129,7 +129,7 @@ specializeF f = specialize . f . relax
 
 withStateIO :: IO s -> (s -> IO ()) -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
 withStateIO load save f = do
-  ref <- run $ newIORef =<< load
+  ref <- liftIO $ newIORef =<< load
   onShutdown $ readIORef ref >>= save
   return $ bindEvent $ \a -> do
     s <- readIORef ref

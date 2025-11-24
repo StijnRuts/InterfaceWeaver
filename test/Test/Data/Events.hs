@@ -147,10 +147,10 @@ spec = do
         [5 :: Int, 6 :: Int]
 
   describe "Events with state" $ do
-    let runStateTests configs = runAppTest $ do
+    let runStateTests configs = runApp Testing $ do
           forM_ configs $ \(beginState, inputs, f, outputs, endState) -> do
             statefull <- withStateIO (pure beginState) (`shouldBe` endState) f
-            run $ runTest inputs statefull outputs
+            liftIO $ runTest inputs statefull outputs
 
     it "should keep track of state" $
       runStateTests
@@ -168,9 +168,9 @@ spec = do
           (0 :: Int, ['b', 'c'], \(a, s) -> (a, s + 1), ['b', 'c'], 2)
         ]
 
-    it "should remove repeats" $ runAppTest $ do
+    it "should remove repeats" $ runApp Testing $ do
       rm <- removeRepeats
-      run $
+      liftIO $
         runTest
           ['a', 'a', 'b', 'b', 'b', 'a']
           rm

@@ -11,8 +11,8 @@ import Data.Functor ((<&>))
 import qualified Evdev
 import qualified Evdev.Codes as Codes
 import InterfaceWeaver.App
+import InterfaceWeaver.CLI
 import InterfaceWeaver.Evdev
-import InterfaceWeaver.Internal
 import InterfaceWeaver.Keyboard
 import Network.BSD (getHostName)
 
@@ -52,20 +52,20 @@ secondaryMouse hostname = error $ "No secondary mouse defined for " <> hostname
 
 main :: IO ()
 main =
-  interfaceWeaver $ do
-    hostname <- run getHostName
+  cli $ do
+    hostname <- liftIO getHostName
     let keyboardDevice = keyboard hostname
     let secondaryMouseDevice = secondaryMouse hostname
 
     countState <- withPersistentState "countA" 0 countA
 
-    run $
+    liftIO $
       deviceSource keyboardDevice True
         <&> mapKeyCodes swapAZ
         <&> countState
         >>= deviceSink "interfaceweaver"
 
-    run $
+    liftIO $
       deviceSource secondaryMouseDevice False
         >>= sink print
 

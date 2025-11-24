@@ -1,4 +1,4 @@
-module InterfaceWeaver.Internal (interfaceWeaver) where
+module InterfaceWeaver.CLI (cli) where
 
 {- HLint ignore "Redundant <&>" -}
 
@@ -12,23 +12,23 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Evdev
 import qualified Evdev.Codes as Codes
-import InterfaceWeaver.App (App, run, runApp)
+import InterfaceWeaver.App (App, Environment (..), runApp, liftIO)
 import qualified InterfaceWeaver.Evdev as Evdev
 import System.Directory (canonicalizePath, doesFileExist, getSymbolicLinkTarget, listDirectory, pathIsSymbolicLink)
 import System.Environment (getArgs)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
 
-interfaceWeaver :: App () -> IO ()
-interfaceWeaver app = do
+cli :: App () -> IO ()
+cli app = do
   args <- getArgs
   case args of
     ["ls"] -> listDevices
     ["list"] -> listDevices
     ["inspect"] -> putStrLn "Usage: Provide a device path such as /dev/input/eventX"
-    ["inspect", devicePath] -> inspectDevice devicePath
-    ["run"] -> runApp app
-    [] -> runApp app
+    ["inspect", devicePath] -> runApp Production $ inspectDevice devicePath
+    ["run"] -> runApp Production app
+    [] -> runApp Production app
     ["-h"] -> putStrLn helpMessage
     ["help"] -> putStrLn helpMessage
     ["--help"] -> putStrLn helpMessage
@@ -70,10 +70,10 @@ listDevices =
               targetPath <- canonicalizePath (takeDirectory path </> target)
               pure [(targetPath, path)]
 
-inspectDevice :: FilePath -> IO ()
-inspectDevice path = runApp $ do
-  run $ printDeviceInfo path
-  run $ Evdev.deviceSource path False >>= Events.sink print
+inspectDevice :: FilePath -> App ()
+inspectDevice path = do
+  liftIO $ printDeviceInfo path
+  liftIO $ Evdev.deviceSource path False >>= Events.sink print
 
 printDeviceInfo :: FilePath -> IO ()
 printDeviceInfo path = do
