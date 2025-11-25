@@ -7,7 +7,7 @@ module Test.Data.Events where
 import Data.Char as Char
 import Data.Events
 import Data.Functor ((<&>))
-import Data.IOSeq as IOSeq
+import Data.IO.Seq as IOSeq
 import qualified Data.Sequence as Seq
 import Data.Union
 import InterfaceWeaver.App

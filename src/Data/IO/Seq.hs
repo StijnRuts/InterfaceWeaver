@@ -1,4 +1,4 @@
-module Data.IOSeq where
+module Data.IO.Seq where
 
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Sequence (Seq, (|>))
