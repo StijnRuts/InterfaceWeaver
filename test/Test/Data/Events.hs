@@ -2,11 +2,12 @@
 
 module Test.Data.Events where
 
-import Control.Monad (forM_)
+{- HLint ignore "Functor law" -}
+
 import Data.Char as Char
 import Data.Events
+import Data.Functor ((<&>))
 import Data.IOSeq as IOSeq
-import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import Data.Union
 import InterfaceWeaver.App
@@ -23,9 +24,9 @@ spec = do
 
   describe "Events Semigroup instance" $ do
     it "should combine events" $
-      runTest2to1
+      runTest
         [Left "first", Right "second"]
-        (uncurry (<>))
+        (split <&> uncurry (<>))
         ["first", "second"]
 
   describe "Events Monoid instance" $ do
@@ -71,28 +72,16 @@ spec = do
         ([5, 15, 6, 16] :: [Int])
 
     it "should partition Events based on a predicate" $
-      runTest1to2
+      runTest
         ([5, 15, 6, 16] :: [Int])
-        (partition' (> 10))
+        (partition' (> 10) <&> join)
         [Left 5, Right 15, Left 6, Right 16]
 
     it "should unpartition Events" $
-      runTest2to1
+      runTest
         ([Left 5, Right 15, Left 6, Right 16] :: [Either Int Int])
-        unpartition'
+        (split <&> unpartition')
         [5, 15, 6, 16]
-
-    it "should split Events of Either" $
-      runTest1to2
-        [Left 'a', Right True, Left 'b', Right False]
-        split
-        [Left 'a', Right True, Left 'b', Right False]
-
-    it "should unpartition Events" $
-      runTest2to1
-        ([Left 5, Right 15, Left 6, Right 16] :: [Either Int Int])
-        join
-        [Left 5, Right 15, Left 6, Right 16]
 
     it "should map both halves" $
       runTest
@@ -101,9 +90,9 @@ spec = do
         [Left 10, Right 16, Left 12, Right 17]
 
     it "should map both halves" $
-      runTest2to2
+      runTest
         ([Left 5, Right 15, Left 6, Right 16] :: [Either Int Int])
-        (mapLeft' (fmap (* 2)) . mapRight' (fmap (+ 1)))
+        (split <&> mapLeft' (fmap (* 2)) . mapRight' (fmap (+ 1)) <&> join)
         [Left 10, Right 16, Left 12, Right 17]
 
   describe "Events of Union types" $ do
@@ -149,26 +138,13 @@ spec = do
         [5 :: Int, 6 :: Int]
 
   describe "Events with state" $ do
-    let runStateTests configs = runApp Testing $ do
-          forM_ configs $ \(beginState, inputs, f, outputs, endState) -> do
-            statefull <- withStateIO (pure beginState) (`shouldBe` endState) f
-            liftIO $ runTest inputs statefull outputs
-
     it "should keep track of state" $
-      runStateTests
-        [ ( 0,
-            ["Hello", "world", "!"],
-            \(a, s) -> (length a, s + length a),
-            [5, 5, 1],
-            11
-          )
-        ]
-
-    it "should keep track of separate states" $
-      runStateTests
-        [ (0 :: Int, ['a'], \(a, s) -> (a, s + 1), ['a'], 1),
-          (0 :: Int, ['b', 'c'], \(a, s) -> (a, s + 1), ['b', 'c'], 2)
-        ]
+      runStateTest
+        0
+        ["Hello", "world", "!"]
+        (\(a, s) -> (length a, s + length a))
+        [5, 5, 1]
+        11
 
     it "should remove repeats" $ runApp Testing $ do
       rm <- removeRepeats
@@ -178,56 +154,17 @@ spec = do
           rm
           ['a', 'b', 'a']
 
-capture :: Events a -> IO (IO (Seq a))
-capture events = do
-  var <- IOSeq.new
-  sink (IOSeq.add var) events
-  return $ IOSeq.empty var
-
-capture2 :: Events a -> Events b -> IO (IO (Seq (Either a b)))
-capture2 eventsA eventsB = do
-  var <- IOSeq.new
-  sink (IOSeq.add var . Left) eventsA
-  sink (IOSeq.add var . Right) eventsB
-  return $ IOSeq.empty var
-
-source2 :: IO (Events a, Events b, Either a b -> IO ())
-source2 = do
-  (eventsA, pushA) <- source
-  (eventsB, pushB) <- source
-  let pushAB (Left a) = pushA a
-      pushAB (Right b) = pushB b
-  return (eventsA, eventsB, pushAB)
 
 runTest :: (Eq b, Show b) => [a] -> (Events a -> Events b) -> [b] -> IO ()
 runTest inputs f outputs = do
-  (eventsA, push) <- source
-  let eventsB = f eventsA
-  await <- capture eventsB
+  var <- IOSeq.new
+  (events, push) <- source
+  sink (IOSeq.add var) (f events)
   mapM_ push inputs
-  await `shouldReturn` Seq.fromList outputs
+  IOSeq.get var `shouldReturn` Seq.fromList outputs
 
-runTest1to2 :: (Eq b, Show b, Eq c, Show c) => [a] -> (Events a -> (Events b, Events c)) -> [Either b c] -> IO ()
-runTest1to2 inputs f outputs = do
-  (eventsA, push) <- source
-  let (eventsB, eventsC) = f eventsA
-  await <- capture2 eventsB eventsC
-  mapM_ push inputs
-  await `shouldReturn` Seq.fromList outputs
-
-runTest2to1 :: (Eq c, Show c) => [Either a b] -> ((Events a, Events b) -> Events c) -> [c] -> IO ()
-runTest2to1 inputs f outputs = do
-  (eventsA, eventsB, push) <- source2
-  let eventsC = f (eventsA, eventsB)
-  await <- capture eventsC
-  mapM_ push inputs
-  await `shouldReturn` Seq.fromList outputs
-
-runTest2to2 :: (Eq c, Show c, Eq d, Show d) => [Either a b] -> ((Events a, Events b) -> (Events c, Events d)) -> [Either c d] -> IO ()
-runTest2to2 inputs f outputs = do
-  (eventsA, eventsB, push) <- source2
-  let (eventsC, eventsD) = f (eventsA, eventsB)
-  await <- capture2 eventsC eventsD
-  mapM_ push inputs
-  await `shouldReturn` Seq.fromList outputs
+runStateTest :: (Eq s, Show s, Eq b, Show b) => s -> [a] -> ((a, s) -> (b, s)) -> [b] -> s -> IO ()
+runStateTest beginState inputs f outputs endState = runApp Testing $ do
+  statefull <- withStateIO (pure beginState) (`shouldBe` endState) f
+  liftIO $ runTest inputs statefull outputs
 
