@@ -7,6 +7,7 @@ import Control.Monad.State (State, runState)
 import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Aeson as JSON
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.IOSeq as IOSeq
 import qualified Data.List as List
 import Data.Maybe (fromMaybe, maybeToList)
 import Data.Union
@@ -19,12 +20,9 @@ newtype Events a = Events ((a -> IO ()) -> IO ())
 
 source :: IO (Events a, a -> IO ())
 source = do
-  listenersRef <- newIORef []
-  let events = Events $ \callback -> do
-        atomicModifyIORef' listenersRef $ \callbacks -> (callback : callbacks, ())
-  let push a = do
-        callbacks <- readIORef listenersRef
-        mapM_ (\callback -> callback a) callbacks
+  listeners <- IOSeq.new
+  let events = Events $ IOSeq.add listeners
+  let push a = IOSeq.get listeners >>= mapM_ ($ a)
   return (events, push)
 
 sink :: (a -> IO ()) -> Events a -> IO ()
@@ -131,11 +129,8 @@ withStateIO :: IO s -> (s -> IO ()) -> ((a, s) -> (b, s)) -> App (Events a -> Ev
 withStateIO load save f = do
   ref <- liftIO $ newIORef =<< load
   onShutdown $ readIORef ref >>= save
-  return $ bindEvent $ \a -> do
-    s <- readIORef ref
-    let (b, s') = f (a, s)
-    writeIORef ref s'
-    return [b]
+  return $ bindEvent $ \a ->
+    fmap List.singleton <$> atomicModifyIORef' ref $ \s -> Tuple.swap $ f (a, s)
 
 withState :: s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
 withState initial = withStateIO (return initial) (\_ -> return ())

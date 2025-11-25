@@ -2,10 +2,12 @@
 
 module Test.Data.Events where
 
-import Control.Concurrent.MVar (modifyMVar_, newMVar, swapMVar)
 import Control.Monad (forM_)
 import Data.Char as Char
 import Data.Events
+import Data.IOSeq as IOSeq
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import Data.Union
 import InterfaceWeaver.App
 import Test.Hspec
@@ -176,18 +178,18 @@ spec = do
           rm
           ['a', 'b', 'a']
 
-capture :: Events a -> IO (IO [a])
+capture :: Events a -> IO (IO (Seq a))
 capture events = do
-  var <- newMVar []
-  sink (\val -> modifyMVar_ var $ \vals -> pure $ val : vals) events
-  return $ reverse <$> swapMVar var []
+  var <- IOSeq.new
+  sink (IOSeq.add var) events
+  return $ IOSeq.empty var
 
-capture2 :: Events a -> Events b -> IO (IO [Either a b])
+capture2 :: Events a -> Events b -> IO (IO (Seq (Either a b)))
 capture2 eventsA eventsB = do
-  var <- newMVar []
-  sink (\val -> modifyMVar_ var $ \vals -> pure $ Left val : vals) eventsA
-  sink (\val -> modifyMVar_ var $ \vals -> pure $ Right val : vals) eventsB
-  return $ reverse <$> swapMVar var []
+  var <- IOSeq.new
+  sink (IOSeq.add var . Left) eventsA
+  sink (IOSeq.add var . Right) eventsB
+  return $ IOSeq.empty var
 
 source2 :: IO (Events a, Events b, Either a b -> IO ())
 source2 = do
@@ -203,7 +205,7 @@ runTest inputs f outputs = do
   let eventsB = f eventsA
   await <- capture eventsB
   mapM_ push inputs
-  await `shouldReturn` outputs
+  await `shouldReturn` Seq.fromList outputs
 
 runTest1to2 :: (Eq b, Show b, Eq c, Show c) => [a] -> (Events a -> (Events b, Events c)) -> [Either b c] -> IO ()
 runTest1to2 inputs f outputs = do
@@ -211,7 +213,7 @@ runTest1to2 inputs f outputs = do
   let (eventsB, eventsC) = f eventsA
   await <- capture2 eventsB eventsC
   mapM_ push inputs
-  await `shouldReturn` outputs
+  await `shouldReturn` Seq.fromList outputs
 
 runTest2to1 :: (Eq c, Show c) => [Either a b] -> ((Events a, Events b) -> Events c) -> [c] -> IO ()
 runTest2to1 inputs f outputs = do
@@ -219,7 +221,7 @@ runTest2to1 inputs f outputs = do
   let eventsC = f (eventsA, eventsB)
   await <- capture eventsC
   mapM_ push inputs
-  await `shouldReturn` outputs
+  await `shouldReturn` Seq.fromList outputs
 
 runTest2to2 :: (Eq c, Show c, Eq d, Show d) => [Either a b] -> ((Events a, Events b) -> (Events c, Events d)) -> [Either c d] -> IO ()
 runTest2to2 inputs f outputs = do
@@ -227,4 +229,5 @@ runTest2to2 inputs f outputs = do
   let (eventsC, eventsD) = f (eventsA, eventsB)
   await <- capture2 eventsC eventsD
   mapM_ push inputs
-  await `shouldReturn` outputs
+  await `shouldReturn` Seq.fromList outputs
+

@@ -12,7 +12,7 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Evdev
 import qualified Evdev.Codes as Codes
-import InterfaceWeaver.App (App, Environment (..), runApp, liftIO)
+import InterfaceWeaver.App (App, Environment (..), liftIO, runApp)
 import qualified InterfaceWeaver.Evdev as Evdev
 import System.Directory (canonicalizePath, doesFileExist, getSymbolicLinkTarget, listDirectory, pathIsSymbolicLink)
 import System.Environment (getArgs)
