@@ -49,7 +49,7 @@ spec = do
     it "should allow only values that satisfy the predicate" $
       runTest
         ([5, 15, 6, 16] :: [Int])
-        (filterPredicate (> 10))
+        (matching (> 10))
         [15, 16]
 
     it "should transform and filter values using Maybe" $

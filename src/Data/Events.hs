@@ -54,8 +54,8 @@ instance Monoid (Events a) where
 flatten :: Events [a] -> Events a
 flatten = bindEvent pure
 
-filterPredicate :: (a -> Bool) -> Events a -> Events a
-filterPredicate predicate = bindEvent $ \a -> if predicate a then pure [a] else pure []
+matching :: (a -> Bool) -> Events a -> Events a
+matching predicate = bindEvent $ \a -> if predicate a then pure [a] else pure []
 
 filterMap :: (a -> Maybe b) -> Events a -> Events b
 filterMap f = bindEvent $ pure . maybeToList . f

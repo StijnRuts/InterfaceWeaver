@@ -5,6 +5,7 @@
     package = pkgs.haskell.packages.ghc9103.ghcWithPackages (ps: with ps; [
       aeson
       evdev
+      free
       hspec
       network-bsd
       QuickCheck
