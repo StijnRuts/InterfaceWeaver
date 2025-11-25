@@ -4,6 +4,9 @@ module Test.Data.Events where
 
 {- HLint ignore "Functor law" -}
 
+import Control.Concurrent (threadDelay)
+import Control.Monad (forM_)
+import Control.Timeout
 import Data.Char as Char
 import Data.Events
 import Data.Functor ((<&>))
@@ -146,14 +149,54 @@ spec = do
         [5, 5, 1]
         11
 
-    it "should remove repeats" $ runApp Testing $ do
-      rm <- removeRepeats
-      liftIO $
-        runTest
-          ['a', 'a', 'b', 'b', 'b', 'a']
-          rm
-          ['a', 'b', 'a']
+    it "should remove repeats" $
+      runAppTest
+        ['a', 'a', 'b', 'b', 'b', 'a']
+        removeRepeats
+        ['a', 'b', 'a']
 
+  describe "Events with time" $ do
+    it "provide a constant stream of events" $
+      runTimedTest
+        [[], [], [], [], [], [], []]
+        (pure $ const $ every (20 @ milliseconds))
+        [[], [], [()], [], [()], [], [()]]
+        []
+
+    it "should postpone event delivery" $
+      runTimedTest
+        [['a'], ['b'], ['c'], ['d'], ['e'], ['f'], ['g']]
+        (withTimeout $ delay (30 @ milliseconds))
+        [[], [], [], ['a'], ['b'], ['c'], ['d']]
+        ['e', 'f', 'g']
+
+    it "should delay event emission until inactivity" $
+      runTimedTest
+        [['a'], ['a'], ['b'], ['b'], [], [], [], ['a'], ['a', 'b']]
+        (withTimeout $ debounceAll (20 @ milliseconds))
+        [[], [], [], [], [], ['b'], [], [], []]
+        ['b']
+
+    it "should delay event emission by value until inactivity" $
+      runTimedTest
+        [['a'], ['a'], ['b'], ['b'], [], [], [], ['a'], ['a', 'b']]
+        (withTimeout $ debounceByValue (20 @ milliseconds))
+        [[], [], [], ['a'], [], ['b'], [], [], []]
+        ['a', 'b']
+
+    it "should limit event frequency" $
+      runTimedTest
+        [['a'], ['a'], ['a'], ['b'], [], [], [], ['a'], ['a', 'b']]
+        (withTimeout $ throttleAll (20 @ milliseconds))
+        [['a'], [], ['a'], [], [], [], [], ['a'], []]
+        []
+
+    it "should limit event frequency by value" $
+      runTimedTest
+        [['a'], ['a'], ['a'], ['b'], [], [], [], ['a'], ['a', 'b']]
+        (withTimeout $ throttleByValue (20 @ milliseconds))
+        [['a'], [], ['a'], ['b'], [], [], [], ['a'], ['b']]
+        []
 
 runTest :: (Eq b, Show b) => [a] -> (Events a -> Events b) -> [b] -> IO ()
 runTest inputs f outputs = do
@@ -163,8 +206,31 @@ runTest inputs f outputs = do
   mapM_ push inputs
   IOSeq.get var `shouldReturn` Seq.fromList outputs
 
-runStateTest :: (Eq s, Show s, Eq b, Show b) => s -> [a] -> ((a, s) -> (b, s)) -> [b] -> s -> IO ()
-runStateTest beginState inputs f outputs endState = runApp Testing $ do
-  statefull <- withStateIO (pure beginState) (`shouldBe` endState) f
-  liftIO $ runTest inputs statefull outputs
+runAppTest :: (Eq b, Show b) => [a] -> App (Events a -> Events b) -> [b] -> IO ()
+runAppTest inputs appf outputs =
+  runApp Testing $ do
+    f <- appf
+    liftIO $ runTest inputs f outputs
 
+runStateTest :: (Eq s, Show s, Eq b, Show b) => s -> [a] -> ((a, s) -> (b, s)) -> [b] -> s -> IO ()
+runStateTest beginState inputs f outputs endState =
+  runAppTest
+    inputs
+    (withStateIO (pure beginState) (`shouldBe` endState) f)
+    outputs
+
+runTimedTest :: (Eq b, Show b) => [[a]] -> App (Events a -> Events b) -> [[b]] -> [b] -> IO ()
+runTimedTest inputs appf outputs afterwards = do
+  total <- IOSeq.new
+  var <- IOSeq.new
+  runApp Testing $ do
+    (events, push) <- liftIO source
+    f <- appf
+    liftIO $ sink (IOSeq.add var) (f events)
+    liftIO $ forM_ inputs $ \inputspart -> do
+      mapM_ push inputspart
+      threadDelay (5 @ milliseconds)
+      IOSeq.empty var >>= IOSeq.add total
+      threadDelay (5 @ milliseconds)
+  IOSeq.empty total `shouldReturn` Seq.fromList (Seq.fromList <$> outputs)
+  IOSeq.empty var `shouldReturn` Seq.fromList afterwards

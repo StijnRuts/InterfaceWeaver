@@ -2,14 +2,19 @@
 
 module Data.Events where
 
-import Control.Exception (evaluate)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Monad (forever, void)
 import Control.Monad.State (State, runState)
+import Control.Timeout (TimeSpan, TimeoutM, newTimeouts, runTimeoutM)
+import qualified Control.Timeout as Timeout
 import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Aeson as JSON
+import Data.IO.Seq as IOSeq
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
-import Data.IOSeq as IOSeq
 import qualified Data.List as List
-import Data.Maybe (fromMaybe, maybeToList)
+import Data.Maybe (fromJust, fromMaybe, maybeToList)
+import qualified Data.Set as Set
+import qualified Data.Tuple as Tuple
 import Data.Union
 import InterfaceWeaver.App (App, liftIO, onShutdown)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
@@ -161,3 +166,79 @@ withPersistentStateM path initial f = withPersistentState path initial $ \(a, s)
 removeRepeats :: (Eq a) => App (Events a -> Events a)
 removeRepeats = (flatten .) <$> withState Nothing (\(a, prev) -> ([a | prev /= Just a], Just a))
 
+-- Time-based Events
+
+data TimerUpdate t a b = TimerUpdate
+  { onEvent :: a -> TimeoutM t [b],
+    onTimeout :: t -> [b],
+    fireOnShutdown :: t -> Bool
+  }
+
+withTimeout :: TimerUpdate t a b -> App (Events a -> Events b)
+withTimeout (TimerUpdate {onEvent, onTimeout, fireOnShutdown}) = do
+  timeouts <- liftIO newTimeouts
+  fireTimeoutRef <- liftIO $ newIORef Nothing
+
+  onShutdown $ do
+    fireTimeout <- fromJust <$> readIORef fireTimeoutRef
+    runTimeoutM timeouts fireTimeout $
+      Timeout.fire =<< Timeout.find fireOnShutdown
+
+  return $ \(Events register) ->
+    Events $ \callback -> do
+      let fireTimeout = mapM_ callback . onTimeout
+      writeIORef fireTimeoutRef $ Just fireTimeout
+      register $ \a -> mapM_ callback =<< runTimeoutM timeouts fireTimeout (onEvent a)
+
+-- Constant stream of events
+every :: TimeSpan -> Events ()
+every ts = Events $ \callback ->
+  void $ forkIO $ forever $ do
+    threadDelay ts
+    callback ()
+
+-- Postpone event delivery
+delay :: TimeSpan -> TimerUpdate a a a
+delay ts =
+  TimerUpdate
+    { onEvent = \a -> Timeout.schedule ts a >> return [],
+      onTimeout = (: []),
+      fireOnShutdown = const True
+    }
+
+-- Delay event emission until inactivity
+debounce :: (a -> a -> Bool) -> TimeSpan -> TimerUpdate a a a
+debounce f ts =
+  TimerUpdate
+    { onEvent = \a -> do
+        Timeout.clear =<< Timeout.find (f a)
+        Timeout.schedule ts a
+        return [],
+      onTimeout = (: []),
+      fireOnShutdown = const True
+    }
+
+debounceAll :: TimeSpan -> TimerUpdate a a a
+debounceAll = debounce $ \_ _ -> True
+
+debounceByValue :: (Eq a) => TimeSpan -> TimerUpdate a a a
+debounceByValue = debounce (==)
+
+-- Limit event frequency
+throttle :: (a -> a -> Bool) -> TimeSpan -> TimerUpdate a a a
+throttle f ts =
+  TimerUpdate
+    { onEvent = \a -> do
+        throttleactive <- not . Set.null <$> Timeout.find (f a)
+        if throttleactive
+          then return []
+          else Timeout.schedule ts a >> return [a],
+      onTimeout = const [],
+      fireOnShutdown = const False
+    }
+
+throttleAll :: TimeSpan -> TimerUpdate a a a
+throttleAll = throttle $ \_ _ -> True
+
+throttleByValue :: (Eq a) => TimeSpan -> TimerUpdate a a a
+throttleByValue = throttle (==)
