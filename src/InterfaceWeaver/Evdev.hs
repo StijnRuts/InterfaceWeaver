@@ -9,13 +9,15 @@ import qualified Data.Events as Events
 import qualified Evdev
 import qualified Evdev.Codes as Codes
 import qualified Evdev.Uinput as Uinput
+import System.IO (hPutStrLn, stderr)
 
 deviceSource :: String -> Bool -> IO (Events Evdev.EventData)
 deviceSource path grab = do
   eitherDevice <- try $ Evdev.newDevice $ BS.pack path
   case eitherDevice of
     Left (_ :: SomeException) -> do
-      fail $ "Could not read device " <> path <> ", maybe try sudo"
+      hPutStrLn stderr $ "Could not read device " <> path
+      return mempty
     Right device -> do
       when grab $ Evdev.grabDevice device
       (events, push) <- Events.source
@@ -26,21 +28,14 @@ deviceSource path grab = do
 
 deviceSink :: String -> Events Evdev.EventData -> IO ()
 deviceSink name events = do
-  virtDev <- virtualDevice name
-  Events.sink (Uinput.writeEvent virtDev) events
-
-virtualDevice :: String -> IO Uinput.Device
-virtualDevice name = do
   eitherDevice <-
     try $
       Uinput.newDevice
         (BS.pack name)
         Uinput.defaultDeviceOpts {Uinput.keys = allKeys}
   case eitherDevice of
-    Left (_ :: SomeException) -> do
-      fail $ "Could not create device " <> name <> ", maybe try sudo"
-    Right device -> do
-      return device
+    Left (_ :: SomeException) -> hPutStrLn stderr $ "Could not create device " <> name
+    Right virtDev -> Events.sink (Uinput.writeEvent virtDev) events
 
 {-
 DeviceOpts

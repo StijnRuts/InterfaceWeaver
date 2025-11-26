@@ -1,18 +1,22 @@
 module InterfaceWeaver.CLI (cli) where
 
 {- HLint ignore "Redundant <&>" -}
+{- HLint ignore "Monad law, left identity" -}
+{- HLint ignore "Monad law, right identity" -}
 
 import Control.Category ((>>>))
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
 import qualified Data.ByteString.Char8 as BS
+import Data.Events (Events)
 import qualified Data.Events as Events
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import qualified Data.List as List
 import qualified Data.Map as Map
+import Data.Maybe (catMaybes)
 import qualified Evdev
 import qualified Evdev.Codes as Codes
-import InterfaceWeaver.App (App, Environment (..), liftIO, runApp)
+import InterfaceWeaver.App (App, Environment (..), liftIO, runApp, (<**>))
 import qualified InterfaceWeaver.Evdev as Evdev
 import System.Directory (canonicalizePath, doesFileExist, getSymbolicLinkTarget, listDirectory, pathIsSymbolicLink)
 import System.Environment (getArgs)
@@ -25,8 +29,9 @@ cli app = do
   case args of
     ["ls"] -> listDevices
     ["list"] -> listDevices
+    ["detect"] -> runApp Production detectDevices
     ["inspect"] -> putStrLn "Usage: Provide a device path such as /dev/input/eventX"
-    ["inspect", devicePath] -> runApp Production $ inspectDevice devicePath
+    ["inspect", devicePath] -> runApp Production $ liftIO $ inspectDevice devicePath
     ["run"] -> runApp Production app
     [] -> runApp Production app
     ["-h"] -> putStrLn helpMessage
@@ -37,20 +42,36 @@ cli app = do
       putStrLn helpMessage
 
 helpMessage :: String
-helpMessage = "TODO help message"
+helpMessage =
+  unlines
+    [ "list: print a list of all devices found",
+      "detect: print the path of a device when an events is detected",
+      "inspect PATH: show all events for the device at PATH",
+      "run: run your app configuration",
+      "help: display this help message"
+    ]
 
-listDevices :: IO ()
-listDevices =
-  do
-    pure
-      [ BS.unpack Evdev.evdevDir,
-        BS.unpack Evdev.evdevDir </> "by-path",
-        BS.unpack Evdev.evdevDir </> "by-id"
-      ]
+type DeviceInfo = (FilePath, Evdev.Device)
+
+getDevice :: FilePath -> IO (Maybe DeviceInfo)
+getDevice path = do
+  eitherDevice <- try $ Evdev.newDevice $ BS.pack path
+  case eitherDevice of
+    Right device -> return $ Just (path, device)
+    Left (_ :: SomeException) -> return Nothing
+
+getDevices :: IO [DeviceInfo]
+getDevices =
+  pure
+    [ BS.unpack Evdev.evdevDir,
+      BS.unpack Evdev.evdevDir </> "by-path",
+      BS.unpack Evdev.evdevDir </> "by-id"
+    ]
     >>= foldMap listDirectoryFull
     >>= foldMap resolveSymlink
-    <&> (Map.fromList >>> Map.elems >>> List.sort)
-    >>= foldMap printDeviceInfo
+    <&> deduplicateSymlinks
+    >>= mapM getDevice
+    <&> catMaybes
   where
     listDirectoryFull :: FilePath -> IO [FilePath]
     listDirectoryFull dir = do
@@ -70,39 +91,63 @@ listDevices =
               targetPath <- canonicalizePath (takeDirectory path </> target)
               pure [(targetPath, path)]
 
-inspectDevice :: FilePath -> App ()
-inspectDevice path = do
-  liftIO $ printDeviceInfo path
-  liftIO $ Evdev.deviceSource path False >>= Events.sink print
+    deduplicateSymlinks :: [(FilePath, FilePath)] -> [FilePath]
+    deduplicateSymlinks = Map.fromList >>> Map.elems >>> List.sort
 
-printDeviceInfo :: FilePath -> IO ()
-printDeviceInfo path = do
-  eitherDevice <- try $ Evdev.newDevice $ BS.pack path
-  case eitherDevice of
-    Left (_ :: SomeException) -> do
-      hPutStrLn stderr $ "Could not read device " <> path <> ", maybe try sudo"
-      putStrLn ""
-    Right device -> do
-      putStrLn $ "Device: " <> path
-      name <- Evdev.deviceName device
-      putStrLn $ "  Name: " <> BS.unpack name
-      properties <- Evdev.deviceProperties device
-      unless (null properties) $ do
-        putStrLn "  Properties:"
-        mapM_ (putStrLn . (\p -> "    - " ++ showProperty p)) properties
-      eventTypes <- Evdev.deviceEventTypes device
-      let filteredEventTypes = List.filter (/= Codes.EvSyn) eventTypes
-      unless (null filteredEventTypes) $ do
-        putStrLn "  Events:"
-        mapM_ (putStrLn . (\p -> "    - " ++ showEventType p)) filteredEventTypes
-      putStrLn ""
+listDevices :: IO ()
+listDevices = do
+  devices <- getDevices
+  if null devices
+    then hPutStrLn stderr "Could not read any devices"
+    else foldMap printDeviceInfo devices
+
+detectDevices :: App ()
+detectDevices = do
+  devices <- liftIO getDevices
+  if null devices
+    then liftIO $ hPutStrLn stderr "Could not read any devices"
+    else
+      return devices
+        >>= foldMap toPathEvents
+          <**> suppressRepeats
+        >>= liftIO . Events.sink putStr
+  where
+    toPathEvents :: DeviceInfo -> App (Events String)
+    toPathEvents (path, _) = liftIO (Evdev.deviceSource path False) <&> ($> path)
+    suppressRepeats :: App (Events String -> Events String)
+    suppressRepeats = Events.withState "" (\(path, active) -> (if path /= active then "\n" <> path <> "\n" else ".", path))
+
+inspectDevice :: FilePath -> IO ()
+inspectDevice path = do
+  maybeDeviceInfo <- getDevice path
+  case maybeDeviceInfo of
+    Nothing -> hPutStrLn stderr $ "Could not read device " <> path
+    Just deviceInfo -> do
+      printDeviceInfo deviceInfo
+      Evdev.deviceSource path False >>= Events.sink print
+
+printDeviceInfo :: DeviceInfo -> IO ()
+printDeviceInfo (path, device) = do
+  putStrLn $ "Device: " <> path
+  name <- Evdev.deviceName device
+  putStrLn $ "  Name: " <> BS.unpack name
+  properties <- Evdev.deviceProperties device
+  unless (null properties) $ do
+    putStrLn "  Properties:"
+    mapM_ (putStrLn . (\p -> "    - " ++ showProperty p)) properties
+  eventTypes <- Evdev.deviceEventTypes device
+  let filteredEventTypes = List.filter (/= Codes.EvSyn) eventTypes
+  unless (null filteredEventTypes) $ do
+    putStrLn "  Events:"
+    mapM_ (putStrLn . (\p -> "    - " ++ showEventType p)) filteredEventTypes
+  putStrLn ""
 
 showProperty :: Codes.DeviceProperty -> String
 showProperty Codes.InputPropPointer = "Pointer"
 showProperty Codes.InputPropDirect = "Direct"
 showProperty Codes.InputPropButtonpad = "Buttonpad"
-showProperty Codes.InputPropSemiMt = "Semi-multitouch"
 showProperty Codes.InputPropTopbuttonpad = "Topbuttonpad"
+showProperty Codes.InputPropSemiMt = "Semi-multitouch"
 showProperty Codes.InputPropPointingStick = "Pointing stick"
 showProperty Codes.InputPropAccelerometer = "Accelerometer"
 
