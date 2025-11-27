@@ -11,25 +11,26 @@ newtype LoopHook = LoopHook [IO ()]
 newtype ShutdownHook = ShutdownHook [IO ()]
   deriving (Semigroup, Monoid)
 
-type App a = WriterT LoopHook (WriterT ShutdownHook IO) a
+newtype App a = App (WriterT LoopHook (WriterT ShutdownHook IO) a)
+  deriving (Functor, Applicative, Monad)
 
 instance (Semigroup a) => Semigroup (App a) where
-  (<>) = liftA2 (<>)
+  (<>) (App x) (App y) = App $ liftA2 (<>) x y
 
 instance (Monoid a) => Monoid (App a) where
-  mempty = pure mempty
+  mempty = App $ pure mempty
 
 onLoop :: IO () -> App ()
-onLoop hook = tell (LoopHook [hook])
+onLoop hook = App $ tell (LoopHook [hook])
 
 onShutdown :: IO () -> App ()
-onShutdown hook = lift $ tell (ShutdownHook [hook])
+onShutdown hook = App $ lift $ tell (ShutdownHook [hook])
 
 liftIO :: IO a -> App a
-liftIO = Control.Monad.IO.Class.liftIO
+liftIO = App . Control.Monad.IO.Class.liftIO
 
 runApp :: App () -> IO ()
-runApp app =
+runApp (App app) =
   bracket
     (runWriterT $ execWriterT app)
     (\(_, ShutdownHook hooks) -> sequence_ hooks)
