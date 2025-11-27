@@ -14,9 +14,9 @@ spec = do
       Helpers {run, tick} <- getHelpers
       run $ schedule (10 @ milliseconds) 'a'
       run $ schedule (20 @ milliseconds) 'b'
-      run $ schedule (10 @ milliseconds) 'c'
+      run $ schedule (11 @ milliseconds) 'c'
       tick []
-      run $ schedule (10 @ milliseconds) 'd'
+      run $ schedule (11 @ milliseconds) 'd'
       tick ['a', 'c']
       tick ['b', 'd']
 
@@ -24,8 +24,8 @@ spec = do
       Helpers {run, tick} <- getHelpers
       run $ schedule (10 @ milliseconds) 'a'
       run $ schedule (10 @ milliseconds) 'A'
-      run $ schedule (10 @ milliseconds) 'b'
-      run $ schedule (10 @ milliseconds) 'B'
+      run $ schedule (11 @ milliseconds) 'b'
+      run $ schedule (11 @ milliseconds) 'B'
       run $ find Char.isUpper >>= update (20 @ milliseconds)
       tick []
       tick ['a', 'b']
@@ -35,8 +35,8 @@ spec = do
       Helpers {run, tick} <- getHelpers
       run $ schedule (10 @ milliseconds) 'a'
       run $ schedule (10 @ milliseconds) 'A'
-      run $ schedule (10 @ milliseconds) 'b'
-      run $ schedule (10 @ milliseconds) 'B'
+      run $ schedule (11 @ milliseconds) 'b'
+      run $ schedule (11 @ milliseconds) 'B'
       run $ find Char.isUpper >>= clear
       tick []
       tick ['a', 'b']
@@ -46,8 +46,8 @@ spec = do
       Helpers {run, tick} <- getHelpers
       run $ schedule (10 @ milliseconds) 'a'
       run $ schedule (10 @ milliseconds) 'A'
-      run $ schedule (10 @ milliseconds) 'b'
-      run $ schedule (10 @ milliseconds) 'B'
+      run $ schedule (11 @ milliseconds) 'b'
+      run $ schedule (11 @ milliseconds) 'B'
       run $ find Char.isUpper >>= fire
       tick ['A', 'B']
       tick ['a', 'b']
