@@ -159,42 +159,42 @@ spec = do
     it "provide a constant stream of events" $
       runTimedTest
         [[], [], [], [], [], [], []]
-        (pure $ const $ every (20 @ milliseconds))
+        (const $ every (20 @ milliseconds))
         [[], [], [()], [], [()], [], [()]]
         []
 
     it "should postpone event delivery" $
       runTimedTest
         [['a'], ['b'], ['c'], ['d'], ['e'], ['f'], ['g']]
-        (withTimeout $ delay (30 @ milliseconds))
+        (delay (30 @ milliseconds))
         [[], [], [], ['a'], ['b'], ['c'], ['d']]
         ['e', 'f', 'g']
 
     it "should delay event emission until inactivity" $
       runTimedTest
         [['a'], ['a'], ['b'], ['b'], [], [], [], ['a'], ['a', 'b']]
-        (withTimeout $ debounceAll (20 @ milliseconds))
+        (debounceAll (20 @ milliseconds))
         [[], [], [], [], [], ['b'], [], [], []]
         ['b']
 
     it "should delay event emission by value until inactivity" $
       runTimedTest
         [['a'], ['a'], ['b'], ['b'], [], [], [], ['a'], ['a', 'b']]
-        (withTimeout $ debounceByValue (20 @ milliseconds))
+        (debounceByValue (20 @ milliseconds))
         [[], [], [], ['a'], [], ['b'], [], [], []]
         ['a', 'b']
 
     it "should limit event frequency" $
       runTimedTest
         [['a'], ['a'], ['a'], ['b'], [], [], [], ['a'], ['a', 'b']]
-        (withTimeout $ throttleAll (20 @ milliseconds))
+        (throttleAll (20 @ milliseconds))
         [['a'], [], ['a'], [], [], [], [], ['a'], []]
         []
 
     it "should limit event frequency by value" $
       runTimedTest
         [['a'], ['a'], ['a'], ['b'], [], [], [], ['a'], ['a', 'b']]
-        (withTimeout $ throttleByValue (20 @ milliseconds))
+        (throttleByValue (20 @ milliseconds))
         [['a'], [], ['a'], ['b'], [], [], [], ['a'], ['b']]
         []
 
@@ -217,14 +217,13 @@ runStateTest beginState inputs f outputs endState =
     (withStateIO (pure beginState) (`shouldBe` endState) f)
     outputs
 
-runTimedTest :: (Eq b, Show b) => [[a]] -> App (Events a -> Events b) -> [[b]] -> [b] -> IO ()
-runTimedTest inputs appf outputs afterwards = do
+runTimedTest :: (Eq b, Show b) => [[a]] -> (Events a -> App (Events b)) -> [[b]] -> [b] -> IO ()
+runTimedTest inputs f outputs afterwards = do
   total <- IOSeq.new
   var <- IOSeq.new
   runApp $ do
     (events, push) <- liftIO source
-    f <- appf
-    liftIO $ sink (IOSeq.add var) (f events)
+    liftIO . sink (IOSeq.add var) =<< f events
     liftIO $ forM_ inputs $ \inputspart -> do
       mapM_ push inputspart
       threadDelay (5 @ milliseconds)

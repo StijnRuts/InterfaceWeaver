@@ -2,8 +2,7 @@
 
 module Data.Events where
 
-import Control.Concurrent (forkIO, threadDelay)
-import Control.Monad (forever, void)
+import Control.Monad (void)
 import Control.Monad.State (State, runState)
 import Control.Timeout (TimeSpan, TimeoutM, newTimeouts, runTimeoutM)
 import qualified Control.Timeout as Timeout
@@ -16,6 +15,7 @@ import Data.Maybe (fromJust, fromMaybe, maybeToList)
 import qualified Data.Set as Set
 import qualified Data.Tuple as Tuple
 import Data.Union
+import GHC.Event (getSystemTimerManager, registerTimeout)
 import InterfaceWeaver.App (App, liftIO, onShutdown)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 
@@ -176,8 +176,8 @@ data TimerUpdate t a b = TimerUpdate
     fireOnShutdown :: t -> Bool
   }
 
-withTimeout :: TimerUpdate t a b -> App (Events a -> Events b)
-withTimeout (TimerUpdate {onEvent, onTimeout, fireOnShutdown}) = do
+withTimeout :: TimerUpdate t a b -> Events a -> App (Events b)
+withTimeout (TimerUpdate {onEvent, onTimeout, fireOnShutdown}) (Events register) = do
   timeouts <- liftIO newTimeouts
   fireTimeoutRef <- liftIO $ newIORef Nothing
 
@@ -186,61 +186,66 @@ withTimeout (TimerUpdate {onEvent, onTimeout, fireOnShutdown}) = do
     runTimeoutM timeouts fireTimeout $
       Timeout.fire =<< Timeout.find fireOnShutdown
 
-  return $ \(Events register) ->
-    Events $ \callback -> do
-      let fireTimeout = mapM_ callback . onTimeout
-      writeIORef fireTimeoutRef $ Just fireTimeout
-      register $ \a -> mapM_ callback =<< runTimeoutM timeouts fireTimeout (onEvent a)
+  return $ Events $ \callback -> do
+    let fireTimeout = mapM_ callback . onTimeout
+    writeIORef fireTimeoutRef $ Just fireTimeout
+    register $ \a -> mapM_ callback =<< runTimeoutM timeouts fireTimeout (onEvent a)
 
 -- Constant stream of events
-every :: TimeSpan -> Events ()
-every ts = Events $ \callback ->
-  void $ forkIO $ forever $ do
-    threadDelay ts
-    callback ()
+every :: TimeSpan -> App (Events ())
+every ts = do
+  tm <- liftIO getSystemTimerManager
+  return $ Events (recursive tm)
+  where
+    recursive tm callback = void $ registerTimeout tm ts $ do
+      void $ callback ()
+      recursive tm callback
 
 -- Postpone event delivery
-delay :: TimeSpan -> TimerUpdate a a a
+delay :: TimeSpan -> Events a -> App (Events a)
 delay ts =
-  TimerUpdate
-    { onEvent = \a -> Timeout.schedule ts a >> return [],
-      onTimeout = (: []),
-      fireOnShutdown = const True
-    }
+  withTimeout
+    TimerUpdate
+      { onEvent = \a -> Timeout.schedule ts a >> return [],
+        onTimeout = (: []),
+        fireOnShutdown = const True
+      }
 
 -- Delay event emission until inactivity
-debounce :: (a -> a -> Bool) -> TimeSpan -> TimerUpdate a a a
+debounce :: (a -> a -> Bool) -> TimeSpan -> Events a -> App (Events a)
 debounce f ts =
-  TimerUpdate
-    { onEvent = \a -> do
-        Timeout.clear =<< Timeout.find (f a)
-        Timeout.schedule ts a
-        return [],
-      onTimeout = (: []),
-      fireOnShutdown = const True
-    }
+  withTimeout
+    TimerUpdate
+      { onEvent = \a -> do
+          Timeout.clear =<< Timeout.find (f a)
+          Timeout.schedule ts a
+          return [],
+        onTimeout = (: []),
+        fireOnShutdown = const True
+      }
 
-debounceAll :: TimeSpan -> TimerUpdate a a a
+debounceAll :: TimeSpan -> Events a -> App (Events a)
 debounceAll = debounce $ \_ _ -> True
 
-debounceByValue :: (Eq a) => TimeSpan -> TimerUpdate a a a
+debounceByValue :: (Eq a) => TimeSpan -> Events a -> App (Events a)
 debounceByValue = debounce (==)
 
 -- Limit event frequency
-throttle :: (a -> a -> Bool) -> TimeSpan -> TimerUpdate a a a
+throttle :: (a -> a -> Bool) -> TimeSpan -> Events a -> App (Events a)
 throttle f ts =
-  TimerUpdate
-    { onEvent = \a -> do
-        throttleactive <- not . Set.null <$> Timeout.find (f a)
-        if throttleactive
-          then return []
-          else Timeout.schedule ts a >> return [a],
-      onTimeout = const [],
-      fireOnShutdown = const False
-    }
+  withTimeout
+    TimerUpdate
+      { onEvent = \a -> do
+          throttleactive <- not . Set.null <$> Timeout.find (f a)
+          if throttleactive
+            then return []
+            else Timeout.schedule ts a >> return [a],
+        onTimeout = const [],
+        fireOnShutdown = const False
+      }
 
-throttleAll :: TimeSpan -> TimerUpdate a a a
+throttleAll :: TimeSpan -> Events a -> App (Events a)
 throttleAll = throttle $ \_ _ -> True
 
-throttleByValue :: (Eq a) => TimeSpan -> TimerUpdate a a a
+throttleByValue :: (Eq a) => TimeSpan -> Events a -> App (Events a)
 throttleByValue = throttle (==)
