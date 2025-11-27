@@ -1,6 +1,5 @@
 module InterfaceWeaver.App where
 
-import qualified Control.Applicative
 import Control.Exception (bracket)
 import Control.Monad (forever, unless)
 import qualified Control.Monad.IO.Class
@@ -19,11 +18,6 @@ instance (Semigroup a) => Semigroup (App a) where
 
 instance (Monoid a) => Monoid (App a) where
   mempty = pure mempty
-
-(<**>) :: (Applicative f) => f a -> f (a -> b) -> f b
-(<**>) = (Control.Applicative.<**>)
-
-infixl 1 <**> -- Change the precedence to match >>= and <&>
 
 onLoop :: IO () -> App ()
 onLoop hook = tell (LoopHook [hook])

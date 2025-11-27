@@ -199,18 +199,16 @@ spec = do
         []
 
 runTest :: (Eq b, Show b) => [a] -> (Events a -> Events b) -> [b] -> IO ()
-runTest inputs f outputs = do
-  var <- IOSeq.new
-  (events, push) <- source
-  sink (IOSeq.add var) (f events)
-  mapM_ push inputs
-  IOSeq.get var `shouldReturn` Seq.fromList outputs
+runTest inputs f = runAppTest inputs (return . f)
 
-runAppTest :: (Eq b, Show b) => [a] -> App (Events a -> Events b) -> [b] -> IO ()
-runAppTest inputs appf outputs =
+runAppTest :: (Eq b, Show b) => [a] -> (Events a -> App (Events b)) -> [b] -> IO ()
+runAppTest inputs f outputs =
   runApp $ do
-    f <- appf
-    liftIO $ runTest inputs f outputs
+    var <- liftIO IOSeq.new
+    (events, push) <- liftIO source
+    liftIO . sink (IOSeq.add var) =<< f events
+    liftIO $ mapM_ push inputs
+    liftIO $ IOSeq.get var `shouldReturn` Seq.fromList outputs
 
 runStateTest :: (Eq s, Show s, Eq b, Show b) => s -> [a] -> ((a, s) -> (b, s)) -> [b] -> s -> IO ()
 runStateTest beginState inputs f outputs endState =

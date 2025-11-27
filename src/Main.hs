@@ -59,7 +59,7 @@ main =
 
     deviceSource keyboardDevice True
       <&> mapKeyCodes swapAZ
-        <**> withPersistentState "countA" 0 countA
+      >>= withPersistentState "countA" 0 countA
       >>= deviceSink "interfaceweaver"
 
     deviceSource secondaryMouseDevice False

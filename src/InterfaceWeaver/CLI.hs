@@ -16,7 +16,7 @@ import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
 import qualified Evdev
 import qualified Evdev.Codes as Codes
-import InterfaceWeaver.App (App, liftIO, runApp, (<**>))
+import InterfaceWeaver.App (App, liftIO, runApp)
 import qualified InterfaceWeaver.Evdev as Evdev
 import System.Directory (canonicalizePath, doesFileExist, getSymbolicLinkTarget, listDirectory, pathIsSymbolicLink)
 import System.Environment (getArgs)
@@ -109,12 +109,12 @@ detectDevices = do
     else
       return devices
         >>= foldMap toPathEvents
-          <**> suppressRepeats
+        >>= suppressRepeats
         >>= liftIO . Events.sink putStr
   where
     toPathEvents :: DeviceInfo -> App (Events String)
     toPathEvents (path, _) = Evdev.deviceSource path False <&> ($> path)
-    suppressRepeats :: App (Events String -> Events String)
+    suppressRepeats :: Events String -> App (Events String)
     suppressRepeats = Events.withState "" (\(path, active) -> (if path /= active then "\n" <> path <> "\n" else ".", path))
 
 inspectDevice :: FilePath -> App ()

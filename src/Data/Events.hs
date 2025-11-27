@@ -130,17 +130,19 @@ specializeF f = specialize . f . relax
 
 -- State-based Events
 
-withStateIO :: IO s -> (s -> IO ()) -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
-withStateIO load save f = do
+withStateIO :: IO s -> (s -> IO ()) -> ((a, s) -> (b, s)) -> Events a -> App (Events b)
+withStateIO load save f eventsA = do
   ref <- liftIO $ newIORef =<< load
   onShutdown $ readIORef ref >>= save
-  return $ bindEvent $ \a ->
-    fmap List.singleton <$> atomicModifyIORef' ref $ \s -> Tuple.swap $ f (a, s)
+  return $
+    bindEvent
+      (\a -> fmap List.singleton <$> atomicModifyIORef' ref $ \s -> Tuple.swap $ f (a, s))
+      eventsA
 
-withState :: s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
+withState :: s -> ((a, s) -> (b, s)) -> Events a -> App (Events b)
 withState initial = withStateIO (return initial) (\_ -> return ())
 
-withPersistentState :: (FromJSON s, ToJSON s) => FilePath -> s -> ((a, s) -> (b, s)) -> App (Events a -> Events b)
+withPersistentState :: (FromJSON s, ToJSON s) => FilePath -> s -> ((a, s) -> (b, s)) -> Events a -> App (Events b)
 withPersistentState filename initial = withStateIO load save
   where
     load = do
@@ -157,14 +159,14 @@ withPersistentState filename initial = withStateIO load save
       createDirectoryIfMissing True dir
       return $ dir <> "/" <> filename <> ".json"
 
-withStateM :: s -> (a -> State s b) -> App (Events a -> Events b)
+withStateM :: s -> (a -> State s b) -> Events a -> App (Events b)
 withStateM initial f = withState initial $ \(a, s) -> runState (f a) s
 
-withPersistentStateM :: (FromJSON s, ToJSON s) => FilePath -> s -> (a -> State s b) -> App (Events a -> Events b)
+withPersistentStateM :: (FromJSON s, ToJSON s) => FilePath -> s -> (a -> State s b) -> Events a -> App (Events b)
 withPersistentStateM path initial f = withPersistentState path initial $ \(a, s) -> runState (f a) s
 
-removeRepeats :: (Eq a) => App (Events a -> Events a)
-removeRepeats = (flatten .) <$> withState Nothing (\(a, prev) -> ([a | prev /= Just a], Just a))
+removeRepeats :: (Eq a) => Events a -> App (Events a)
+removeRepeats = (filterMap id <$>) . withState Nothing (\(a, prev) -> (if prev == Just a then Nothing else Just a, Just a))
 
 -- Time-based Events
 

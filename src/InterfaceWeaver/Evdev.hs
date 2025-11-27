@@ -10,7 +10,7 @@ import qualified Evdev.Codes as Codes
 import qualified Evdev.Uinput as Uinput
 import InterfaceWeaver.App
 import System.IO (hPutStrLn, stderr)
-import System.Posix.IO.ByteString (OpenMode(..), defaultFileFlags, nonBlock, openFd)
+import System.Posix.IO.ByteString (OpenMode (..), defaultFileFlags, nonBlock, openFd)
 
 deviceSource :: String -> Bool -> App (Events Evdev.EventData)
 deviceSource path grab = do
