@@ -1,41 +1,46 @@
 module InterfaceWeaver.Evdev (deviceSource, deviceSink) where
 
-import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
-import Control.Monad (forever, when)
+import Control.Monad (when)
 import qualified Data.ByteString.Char8 as BS
 import Data.Events (Events)
 import qualified Data.Events as Events
 import qualified Evdev
 import qualified Evdev.Codes as Codes
 import qualified Evdev.Uinput as Uinput
+import InterfaceWeaver.App
 import System.IO (hPutStrLn, stderr)
+import System.Posix.IO.ByteString (OpenMode(..), defaultFileFlags, nonBlock, openFd)
 
-deviceSource :: String -> Bool -> IO (Events Evdev.EventData)
+deviceSource :: String -> Bool -> App (Events Evdev.EventData)
 deviceSource path grab = do
-  eitherDevice <- try $ Evdev.newDevice $ BS.pack path
+  fd <- liftIO $ openFd (BS.pack path) ReadOnly defaultFileFlags {nonBlock = True}
+  eitherDevice <- liftIO $ try $ Evdev.newDeviceFromFd fd
   case eitherDevice of
     Left (_ :: SomeException) -> do
-      hPutStrLn stderr $ "Could not read device " <> path
+      liftIO $ hPutStrLn stderr $ "Could not read device " <> path
       return mempty
     Right device -> do
-      when grab $ Evdev.grabDevice device
-      (events, push) <- Events.source
-      _ <- forkIO $ forever $ do
-        (Evdev.Event eventData _) <- Evdev.nextEvent device
-        push eventData
+      when grab $ liftIO $ Evdev.grabDevice device
+      (events, push) <- liftIO Events.source
+      onLoop $ do
+        maybeEvent <- Evdev.nextEventMay device
+        case maybeEvent of
+          Just (Evdev.Event eventData _) -> push eventData
+          Nothing -> return ()
       return events
 
-deviceSink :: String -> Events Evdev.EventData -> IO ()
+deviceSink :: String -> Events Evdev.EventData -> App ()
 deviceSink name events = do
   eitherDevice <-
-    try $
-      Uinput.newDevice
-        (BS.pack name)
-        Uinput.defaultDeviceOpts {Uinput.keys = allKeys}
+    liftIO $
+      try $
+        Uinput.newDevice
+          (BS.pack name)
+          Uinput.defaultDeviceOpts {Uinput.keys = allKeys}
   case eitherDevice of
-    Left (_ :: SomeException) -> hPutStrLn stderr $ "Could not create device " <> name
-    Right virtDev -> Events.sink (Uinput.writeEvent virtDev) events
+    Left (_ :: SomeException) -> liftIO $ hPutStrLn stderr $ "Could not create device " <> name
+    Right virtDev -> liftIO $ Events.sink (Uinput.writeEvent virtDev) events
 
 {-
 DeviceOpts

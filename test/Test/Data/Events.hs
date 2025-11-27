@@ -208,7 +208,7 @@ runTest inputs f outputs = do
 
 runAppTest :: (Eq b, Show b) => [a] -> App (Events a -> Events b) -> [b] -> IO ()
 runAppTest inputs appf outputs =
-  runApp Testing $ do
+  runApp $ do
     f <- appf
     liftIO $ runTest inputs f outputs
 
@@ -223,7 +223,7 @@ runTimedTest :: (Eq b, Show b) => [[a]] -> App (Events a -> Events b) -> [[b]] -
 runTimedTest inputs appf outputs afterwards = do
   total <- IOSeq.new
   var <- IOSeq.new
-  runApp Testing $ do
+  runApp $ do
     (events, push) <- liftIO source
     f <- appf
     liftIO $ sink (IOSeq.add var) (f events)

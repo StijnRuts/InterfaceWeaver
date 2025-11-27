@@ -16,7 +16,7 @@ import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
 import qualified Evdev
 import qualified Evdev.Codes as Codes
-import InterfaceWeaver.App (App, Environment (..), liftIO, runApp, (<**>))
+import InterfaceWeaver.App (App, liftIO, runApp, (<**>))
 import qualified InterfaceWeaver.Evdev as Evdev
 import System.Directory (canonicalizePath, doesFileExist, getSymbolicLinkTarget, listDirectory, pathIsSymbolicLink)
 import System.Environment (getArgs)
@@ -29,11 +29,11 @@ cli app = do
   case args of
     ["ls"] -> listDevices
     ["list"] -> listDevices
-    ["detect"] -> runApp Production detectDevices
+    ["detect"] -> runApp detectDevices
     ["inspect"] -> putStrLn "Usage: Provide a device path such as /dev/input/eventX"
-    ["inspect", devicePath] -> runApp Production $ liftIO $ inspectDevice devicePath
-    ["run"] -> runApp Production app
-    [] -> runApp Production app
+    ["inspect", devicePath] -> runApp $ inspectDevice devicePath
+    ["run"] -> runApp app
+    [] -> runApp app
     ["-h"] -> putStrLn helpMessage
     ["help"] -> putStrLn helpMessage
     ["--help"] -> putStrLn helpMessage
@@ -113,18 +113,18 @@ detectDevices = do
         >>= liftIO . Events.sink putStr
   where
     toPathEvents :: DeviceInfo -> App (Events String)
-    toPathEvents (path, _) = liftIO (Evdev.deviceSource path False) <&> ($> path)
+    toPathEvents (path, _) = Evdev.deviceSource path False <&> ($> path)
     suppressRepeats :: App (Events String -> Events String)
     suppressRepeats = Events.withState "" (\(path, active) -> (if path /= active then "\n" <> path <> "\n" else ".", path))
 
-inspectDevice :: FilePath -> IO ()
+inspectDevice :: FilePath -> App ()
 inspectDevice path = do
-  maybeDeviceInfo <- getDevice path
+  maybeDeviceInfo <- liftIO $ getDevice path
   case maybeDeviceInfo of
-    Nothing -> hPutStrLn stderr $ "Could not read device " <> path
+    Nothing -> liftIO $ hPutStrLn stderr $ "Could not read device " <> path
     Just deviceInfo -> do
-      printDeviceInfo deviceInfo
-      Evdev.deviceSource path False >>= Events.sink print
+      liftIO $ printDeviceInfo deviceInfo
+      Evdev.deviceSource path False >>= liftIO . Events.sink print
 
 printDeviceInfo :: DeviceInfo -> IO ()
 printDeviceInfo (path, device) = do

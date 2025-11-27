@@ -57,17 +57,13 @@ main =
     let keyboardDevice = keyboard hostname
     let secondaryMouseDevice = secondaryMouse hostname
 
-    countState <- withPersistentState "countA" 0 countA
+    deviceSource keyboardDevice True
+      <&> mapKeyCodes swapAZ
+        <**> withPersistentState "countA" 0 countA
+      >>= deviceSink "interfaceweaver"
 
-    liftIO $
-      deviceSource keyboardDevice True
-        <&> mapKeyCodes swapAZ
-        <&> countState
-        >>= deviceSink "interfaceweaver"
-
-    liftIO $
-      deviceSource secondaryMouseDevice False
-        >>= sink print
+    deviceSource secondaryMouseDevice False
+      >>= liftIO . sink print
 
 swapAZ :: Codes.Key -> Codes.Key
 swapAZ Codes.KeyA = Codes.KeyZ

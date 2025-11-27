@@ -31,7 +31,7 @@ source = do
   return (events, push)
 
 sink :: (a -> IO ()) -> Events a -> IO ()
-sink f (Events register) = register f
+sink listener (Events register) = register listener
 
 -- Transforming Events
 

@@ -1,48 +1,42 @@
 module InterfaceWeaver.App where
 
-import qualified Control.Applicative as A
-import Control.Concurrent (threadDelay)
+import qualified Control.Applicative
 import Control.Exception (bracket)
-import Control.Monad (forever, when)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad (forever, unless)
 import qualified Control.Monad.IO.Class
-import Control.Monad.Reader (MonadReader, ReaderT, ask, runReaderT)
-import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
+import Control.Monad.Writer (WriterT, execWriterT, lift, runWriterT, tell)
 
-data Environment = Production | Testing
-  deriving (Eq)
+newtype LoopHook = LoopHook [IO ()]
+  deriving (Semigroup, Monoid)
 
-newtype App a = App {getAppM :: ReaderT Environment (WriterT (IO ()) IO) a}
-  deriving (Functor, Applicative, Monad, MonadIO, MonadWriter (IO ()), MonadReader Environment)
+newtype ShutdownHook = ShutdownHook [IO ()]
+  deriving (Semigroup, Monoid)
+
+type App a = WriterT LoopHook (WriterT ShutdownHook IO) a
 
 instance (Semigroup a) => Semigroup (App a) where
-  (<>) (App x) (App y) = App (liftA2 (<>) x y)
+  (<>) = liftA2 (<>)
 
 instance (Monoid a) => Monoid (App a) where
-  mempty = App (pure mempty)
+  mempty = pure mempty
 
 (<**>) :: (Applicative f) => f a -> f (a -> b) -> f b
-(<**>) = (A.<**>)
+(<**>) = (Control.Applicative.<**>)
 
 infixl 1 <**> -- Change the precedence to match >>= and <&>
 
+onLoop :: IO () -> App ()
+onLoop hook = tell (LoopHook [hook])
+
 onShutdown :: IO () -> App ()
-onShutdown = tell
-
-getEnvironment :: App Environment
-getEnvironment = ask
-
-onEnvironment :: Environment -> App () -> App ()
-onEnvironment env app = do
-  environment <- getEnvironment
-  when (environment == env) app
+onShutdown hook = lift $ tell (ShutdownHook [hook])
 
 liftIO :: IO a -> App a
 liftIO = Control.Monad.IO.Class.liftIO
 
-runApp :: Environment -> App () -> IO ()
-runApp env app =
+runApp :: App () -> IO ()
+runApp app =
   bracket
-    (execWriterT (runReaderT (getAppM app) env))
-    id
-    (\_ -> when (env == Production) $ forever $ threadDelay maxBound)
+    (runWriterT $ execWriterT app)
+    (\(_, ShutdownHook hooks) -> sequence_ hooks)
+    (\(LoopHook hooks, _) -> unless (null hooks) (forever $ sequence_ hooks))
