@@ -131,7 +131,7 @@ spec = do
     it "should wrap an Events function into Events Unions" $
       runTest
         ([inject "Hello", inject True, inject "world!"] :: [Union '[String, Bool]])
-        (relaxF (fmap length :: Events String -> Events Int))
+        (relaxF (fmap length :: Events IO String -> Events IO Int))
         ([inject (5 :: Int), inject (6 :: Int)] :: [Union '[Int, Char]])
 
     it "should extract an Events function from an Events Unions function" $
@@ -198,10 +198,10 @@ spec = do
         [['a'], [], ['a'], ['b'], [], [], [], ['a'], ['b']]
         []
 
-runTest :: (Eq b, Show b) => [a] -> (Events a -> Events b) -> [b] -> IO ()
+runTest :: (Eq b, Show b) => [a] -> (Events IO a -> Events IO b) -> [b] -> IO ()
 runTest inputs f = runAppTest inputs (return . f)
 
-runAppTest :: (Eq b, Show b) => [a] -> (Events a -> App (Events b)) -> [b] -> IO ()
+runAppTest :: (Eq b, Show b) => [a] -> (Events IO a -> App (Events IO b)) -> [b] -> IO ()
 runAppTest inputs f outputs =
   runApp $ do
     var <- liftIO IOSeq.new
@@ -217,7 +217,7 @@ runStateTest beginState inputs f outputs endState =
     (withStateIO (pure beginState) (`shouldBe` endState) f)
     outputs
 
-runTimedTest :: (Eq b, Show b) => [[a]] -> (Events a -> App (Events b)) -> [[b]] -> [b] -> IO ()
+runTimedTest :: (Eq b, Show b) => [[a]] -> (Events IO a -> App (Events IO b)) -> [[b]] -> [b] -> IO ()
 runTimedTest inputs f outputs afterwards = do
   total <- IOSeq.new
   var <- IOSeq.new

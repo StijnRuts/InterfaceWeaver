@@ -2,87 +2,82 @@
 
 module Data.Events where
 
-import Control.Monad (void)
+import Control.Monad (when)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.State (State, runState)
 import Control.Timeout (TimeSpan, TimeoutM, newTimeouts, runTimeoutM)
 import qualified Control.Timeout as Timeout
 import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Aeson as JSON
+import Data.Foldable (traverse_)
 import Data.IO.Seq as IOSeq
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
-import Data.Maybe (fromJust, fromMaybe, maybeToList)
 import qualified Data.Set as Set
 import qualified Data.Tuple as Tuple
 import Data.Union
 import GHC.Event (getSystemTimerManager, registerTimeout)
-import InterfaceWeaver.App (App, liftIO, onShutdown)
+import InterfaceWeaver.App (App, onShutdown)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 
-newtype Events a = Events ((a -> IO ()) -> IO ())
+newtype Events m a = Events ((a -> m ()) -> m ())
 
 -- Sourcing and sinking events
 
-source :: IO (Events a, a -> IO ())
+source :: (MonadIO m) => m (Events m a, a -> m ())
 source = do
-  listeners <- IOSeq.new
-  let events = Events $ IOSeq.add listeners
-  let push a = IOSeq.get listeners >>= mapM_ ($ a)
+  listeners <- liftIO IOSeq.new
+  let events = Events $ liftIO . IOSeq.add listeners
+  let push a = liftIO (IOSeq.get listeners) >>= mapM_ ($ a)
   return (events, push)
 
-sink :: (a -> IO ()) -> Events a -> IO ()
+sink :: (a -> m ()) -> Events m a -> m ()
 sink listener (Events register) = register listener
 
 -- Transforming Events
 
-bindEvent :: (a -> IO [b]) -> Events a -> Events b
-bindEvent f (Events register) =
-  Events $ \callback ->
-    register $ \a -> do
-      bs <- f a
-      mapM_ callback bs
+transformEvent :: ((b -> m ()) -> a -> m ()) -> Events m a -> Events m b
+transformEvent f (Events register) = Events $ register . f
 
-instance Functor Events where
-  fmap :: (a -> b) -> Events a -> Events b
-  fmap f = bindEvent $ pure . List.singleton . f
+instance Functor (Events m) where
+  fmap :: (a -> b) -> Events m a -> Events m b
+  fmap f = transformEvent (. f)
 
-instance Semigroup (Events a) where
-  (<>) :: Events a -> Events a -> Events a
-  Events register1 <> Events register2 = Events $ \callback -> do
-    register1 callback
-    register2 callback
+instance (Applicative m) => Semigroup (Events m a) where
+  (<>) :: Events m a -> Events m a -> Events m a
+  Events register1 <> Events register2 = Events $ liftA2 (*>) register1 register2
 
-instance Monoid (Events a) where
-  mempty :: Events a
-  mempty = Events $ \_ -> return ()
+instance (Applicative m) => Monoid (Events m a) where
+  mempty :: Events m a
+  mempty = Events $ const $ pure ()
 
-flatten :: Events [a] -> Events a
-flatten = bindEvent pure
+flatten :: (Applicative m, Foldable t) => Events m (t a) -> Events m a
+flatten = transformEvent traverse_
 
-matching :: (a -> Bool) -> Events a -> Events a
-matching predicate = bindEvent $ \a -> if predicate a then pure [a] else pure []
+matching :: (Applicative m) => (a -> Bool) -> Events m a -> Events m a
+matching predicate = transformEvent $ liftA2 when predicate
 
-filterMap :: (a -> Maybe b) -> Events a -> Events b
-filterMap f = bindEvent $ pure . maybeToList . f
+filterMap :: (Applicative m) => (a -> Maybe b) -> Events m a -> Events m b
+filterMap f = flatten . fmap f
 
 -- Parallel Events streams
 
-partition :: (a -> Bool) -> Events a -> Events (Either a a)
+partition :: (a -> Bool) -> Events m a -> Events m (Either a a)
 partition predicate = fmap $ \a -> if predicate a then Right a else Left a
 
-unpartition :: Events (Either a a) -> Events a
+unpartition :: Events m (Either a a) -> Events m a
 unpartition = fmap f
   where
     f (Left a) = a
     f (Right a) = a
 
-partition' :: (a -> Bool) -> Events a -> (Events a, Events a)
+partition' :: (Applicative m) => (a -> Bool) -> Events m a -> (Events m a, Events m a)
 partition' = (split .) . partition
 
-unpartition' :: (Events a, Events a) -> Events a
+unpartition' :: (Applicative m) => (Events m a, Events m a) -> Events m a
 unpartition' (events1, events2) = events1 <> events2
 
-split :: Events (Either a b) -> (Events a, Events b)
+split :: (Applicative m) => Events m (Either a b) -> (Events m a, Events m b)
 split events = (filterMap leftToMaybe events, filterMap rightToMaybe events)
   where
     leftToMaybe (Left l) = Just l
@@ -90,42 +85,42 @@ split events = (filterMap leftToMaybe events, filterMap rightToMaybe events)
     rightToMaybe (Left _) = Nothing
     rightToMaybe (Right r) = Just r
 
-join :: (Events a, Events b) -> Events (Either a b)
+join :: (Applicative m) => (Events m a, Events m b) -> Events m (Either a b)
 join (eventsA, eventsB) = fmap Left eventsA <> fmap Right eventsB
 
-mapLeft :: (a -> c) -> Events (Either a b) -> Events (Either c b)
+mapLeft :: (a -> c) -> Events m (Either a b) -> Events m (Either c b)
 mapLeft f = fmap f'
   where
     f' (Left a) = Left (f a)
     f' (Right b) = Right b
 
-mapRight :: (b -> c) -> Events (Either a b) -> Events (Either a c)
+mapRight :: (b -> c) -> Events m (Either a b) -> Events m (Either a c)
 mapRight f = fmap f'
   where
     f' (Left a) = Left a
     f' (Right b) = Right (f b)
 
-mapLeft' :: (Events a -> Events c) -> (Events a, Events b) -> (Events c, Events b)
+mapLeft' :: (Events m a -> Events m c) -> (Events m a, Events m b) -> (Events m c, Events m b)
 mapLeft' f (eventsA, eventsB) = (f eventsA, eventsB)
 
-mapRight' :: (Events b -> Events c) -> (Events a, Events b) -> (Events a, Events c)
+mapRight' :: (Events m b -> Events m c) -> (Events m a, Events m b) -> (Events m a, Events m c)
 mapRight' f (eventsA, eventsB) = (eventsA, f eventsB)
 
 -- Events of Union types
 
-relax :: (Member a u) => Events a -> Events (Union u)
+relax :: (Member a u) => Events m a -> Events m (Union u)
 relax events = inject <$> events
 
-specialize :: (Member a u) => Events (Union u) -> Events a
+specialize :: (Applicative m) => (Member a u) => Events m (Union u) -> Events m a
 specialize = filterMap project
 
-widen :: (Subset u v) => Events (Union u) -> Events (Union v)
+widen :: (Subset u v) => Events m (Union u) -> Events m (Union v)
 widen = fmap weaken
 
-relaxF :: (Member a u, Member b v) => (Events a -> Events b) -> Events (Union u) -> Events (Union v)
+relaxF :: (Applicative m, Member a u, Member b v) => (Events m a -> Events m b) -> Events m (Union u) -> Events m (Union v)
 relaxF f = relax . f . specialize
 
-specializeF :: (Member a u, Member b v) => (Events (Union u) -> Events (Union v)) -> Events a -> Events b
+specializeF :: (Applicative m, Member a u, Member b v) => (Events m (Union u) -> Events m (Union v)) -> Events m a -> Events m b
 specializeF f = specialize . f . relax
 
 -- State-based Events
