@@ -5,14 +5,18 @@ module Data.Events where
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.State (State, runState)
+import qualified Control.Monad.State as State
 import Control.Timeout (TimeSpan, TimeoutM, newTimeouts, runTimeoutM)
 import qualified Control.Timeout as Timeout
 import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Aeson as JSON
-import Data.Foldable (traverse_)
+import Data.Foldable (sequenceA_, traverse_)
+import Data.Functor ((<&>))
 import Data.IO.Seq as IOSeq
 import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.List as List
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import qualified Data.Tuple as Tuple
 import Data.Union
@@ -20,23 +24,30 @@ import GHC.Event (getSystemTimerManager, registerTimeout)
 import InterfaceWeaver.App (App, onShutdown)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 
-newtype Events m a = Events ((a -> m ()) -> m ())
+type Listener m a = a -> m ()
+
+type Listeners m a = Seq (Listener m a)
+
+type Register m a = Listener m a -> State (Listeners m a) ()
+
+type Push m a = a -> State (Listeners m a) (m ())
+
+newtype Events m a = Events (Register m a)
 
 -- Sourcing and sinking events
 
-source :: (MonadIO m) => m (Events m a, a -> m ())
-source = do
-  listeners <- liftIO IOSeq.new
-  let events = Events $ liftIO . IOSeq.add listeners
-  let push a = liftIO (IOSeq.get listeners) >>= mapM_ ($ a)
-  return (events, push)
+source :: (Applicative m) => (Events m a, Push m a)
+source =
+  let register listener = State.modify (Seq.|> listener)
+      push a = State.gets (traverse_ ($ a))
+   in (Events register, push)
 
-sink :: (a -> m ()) -> Events m a -> m ()
+sink :: Listener m a -> Events m a -> State (Listeners m a) ()
 sink listener (Events register) = register listener
 
 -- Transforming Events
 
-transformEvent :: ((b -> m ()) -> a -> m ()) -> Events m a -> Events m b
+transformEvent :: (Listener m b -> Listener m a) -> Events m a -> Events m b
 transformEvent f (Events register) = Events $ register . f
 
 instance Functor (Events m) where
