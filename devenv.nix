@@ -37,8 +37,8 @@
   ];
 
   scripts = {
-    build.exec = "mkdir -p output && ghc -Wall -outputdir output -o output/main -i=src src/AltMain.hs";
-    run.exec = "ghc -i=src --run src/AltMain.hs -- \"$@\"";
+    build.exec = "mkdir -p output && ghc -Wall -outputdir output -o output/main -i=src src/Main2.hs";
+    run.exec = "ghc -i=src --run src/Main2.hs -- \"$@\"";
     tests.exec = "ghc -i=src -i=test --run test/Test/Main.hs";
     watch.exec = "ghcid --test=Test.Main.main --lint=lint";
     format.exec = "ormolu --mode inplace $(find {src,test} -name '*.hs')";
