@@ -1,4 +1,3 @@
 :set -isrc -itest
-:set -Wall
 :load src/Main.hs
 :load test/Test/Main.hs
