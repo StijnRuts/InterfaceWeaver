@@ -7,20 +7,20 @@ import Data.Char (toUpper)
 
 --
 
-data ChannelF next
-  = Emit String next
-  | Await (String -> next)
+data ChannelF i o next
+  = Emit o next
+  | Await (i -> next)
   deriving (Functor)
 
-type Channel = Free ChannelF
+type Channel i o = Free (ChannelF i o)
 
-emit :: String -> Channel ()
-emit v = liftF $ Emit v ()
+emit :: o -> Channel i o ()
+emit o = liftF $ Emit o ()
 
-await :: Channel String
+await :: Channel i o i
 await = liftF $ Await id
 
-newtype Pipe a b = Pipe {runPipe :: [a] -> [b]}
+newtype Pipe i o = Pipe {runPipe :: [i] -> [o]}
 
 instance Category Pipe where
   id = Pipe id
@@ -28,19 +28,19 @@ instance Category Pipe where
 
 --
 
-producer :: Channel ()
+producer :: Channel String String ()
 producer = do
   emit "hello"
   emit "world"
 
-transducer :: Channel ()
+transducer :: Channel String String ()
 transducer = do
   x1 <- await
   emit $ toUpper <$> x1
   x2 <- await
   emit $ toUpper <$> x2
 
-consumer :: Channel ()
+consumer :: Channel String String ()
 consumer = do
   x <- await
   y <- await
@@ -48,10 +48,10 @@ consumer = do
 
 --
 
-interpret :: Channel () -> Pipe String String
-interpret (Pure ()) = Pipe id
-interpret (Free (Emit s next)) = let Pipe f = interpret next in Pipe (\xs -> s : f xs)
-interpret (Free (Await k)) = Pipe (\(x : xs) -> let Pipe f = interpret (k x) in f xs)
+interpret :: Channel i o () -> Pipe i o
+interpret (Pure ()) = Pipe (const [])
+interpret (Free (Emit x next)) = let Pipe f = interpret next in Pipe (\xs -> x : f xs)
+interpret (Free (Await next')) = Pipe (\(x : xs) -> let Pipe f = interpret (next' x) in f xs)
 
 pipeline :: Pipe String String
 pipeline = interpret producer >>> interpret transducer >>> interpret consumer
