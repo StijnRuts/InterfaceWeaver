@@ -5,84 +5,96 @@ module Main2 (main) where
 import Control.Category (Category, (>>>))
 import qualified Control.Category as C
 import Control.Concurrent (threadDelay)
-import Control.Monad (forever)
+import Control.Monad (forever, void)
 import Control.Monad.Free
 import Data.Char (toUpper)
 import Data.Void
 
 --
 
-data ChannelF i o next
+data ChannelF m i o next
   = Emit o next
   | Await (i -> next)
+  | LiftM (m next)
   deriving (Functor)
 
-type Channel i o = Free (ChannelF i o)
+type Channel m i o = Free (ChannelF m i o)
 
-type Transducer i o = Channel i o ()
+type Transducer m i o = Channel m i o ()
 
-type Producer o = Transducer Void o
+type Producer m o = Transducer m Void o
 
-type Consumer i = Transducer i (IO ())
+type Consumer m i = Transducer m i Void
 
-emit :: o -> Channel i o ()
+emit :: (Functor m) => o -> Channel m i o ()
 emit o = liftF $ Emit o ()
 
-await :: Channel i o i
+await :: (Functor m) => Channel m i o i
 await = liftF $ Await id
 
-data Wire i o where
-  FromTransducer :: Transducer i o -> Wire i o
-  Seqential :: Wire a b -> Wire b c -> Wire a c
-  Parallel :: Wire a b -> Wire a c -> Wire a (b, c)
-  Merge :: Wire a b -> Wire a c -> Wire a (Either b c)
+liftM :: (Functor m) => m a -> Channel m i o a
+liftM action = liftF $ LiftM action
+
+data Wire m i o where
+  FromTransducer :: Transducer m i o -> Wire m i o
+  Seqential :: Wire m a b -> Wire m b c -> Wire m a c
+
+-- Parallel :: Wire m a b -> Wire m a c -> Wire m a (b, c)
+-- Merge :: Wire m a b -> Wire m a c -> Wire m a (Either b c)
 
 --
 
-producer :: Producer Int
-producer = go 1
+{-
+producer ::  Producer IO Int
+producer = mapM_ (\f -> emit f >> liftM (threadDelay 1000000)) fibs
   where
-    go n = emit n >> go (n + 1)
+    fibs = 0 : 1 : zipWith (+) fibs (drop 1 fibs)
+-}
 
-double :: Transducer Int Int
-double = forever $ do
-  x <- await
-  emit $ 2 * x
+producer :: Producer IO Int
+producer = do
+  emit 1
+  liftM $ threadDelay 1000000
+  emit 2
+  liftM $ threadDelay 1000000
+  emit 3
+  liftM $ threadDelay 1000000
+  emit 4
+  liftM $ threadDelay 1000000
+  emit 5
 
-showStr :: Transducer Int String
-showStr = forever $ do
-  x <- await
-  emit $ show x
+double :: (Functor m) => Transducer m Int Int
+double = forever $ emit . (2 *) =<< await
 
-collector :: Consumer String
-collector = forever $ do
-  s <- await
-  emit $ putStrLn s
+showStr :: (Functor m, Show s) => Transducer m s String
+showStr = forever $ emit . show =<< await
+
+collector :: Consumer IO String
+collector = forever $ liftM . putStrLn =<< await
 
 --
 
-runTransducer :: Transducer i o -> [i] -> [o]
-runTransducer (Pure ()) _ = []
-runTransducer (Free (Emit x next)) xs = x : runTransducer next xs
-runTransducer (Free (Await next)) [] = [] -- no more input, stop
-runTransducer (Free (Await next)) (x : xs) = runTransducer (next x) xs
+runChannel :: (Monad m) => Channel m i o () -> [i] -> m [o]
+runChannel (Pure ()) _ = return []
+runChannel (Free (Emit o next)) is = (o :) `fmap` runChannel next is
+runChannel (Free (Await next)) [] = return []
+runChannel (Free (Await next)) (i : is) = runChannel (next i) is
+runChannel (Free (LiftM mNext)) is = flip runChannel is =<< mNext
 
-runWire :: Wire i o -> [i] -> [o]
-runWire (FromTransducer ch) is = runTransducer ch is
-runWire (Seqential w1 w2) is = runWire w2 (runWire w1 is)
-runWire (Parallel w1 w2) is = zip (runWire w1 is) (runWire w2 is)
-runWire (Merge w1 w2) [] = []
-runWire (Merge w1 w2) (i : is) = map Left (runWire w1 [i]) ++ map Right (runWire w2 [i]) ++ runWire (Merge w1 w2) is
+runWire :: (Monad m) => Wire m i o -> [i] -> m [o]
+runWire (FromTransducer ch) is = runChannel ch is
+runWire (Seqential w1 w2) is = runWire w2 =<< runWire w1 is
 
-pipeline :: Wire Void (IO ())
+pipeline :: Wire IO Void Void
 pipeline =
-  Seqential (FromTransducer producer)
-    $ Seqential (FromTransducer double)
-      $ Seqential (FromTransducer showStr)
-         (FromTransducer collector)
+  Seqential (FromTransducer producer) $
+    Seqential (FromTransducer double) $
+      Seqential
+        (FromTransducer showStr)
+        (FromTransducer collector)
+
+runPipeline :: Wire IO Void Void -> IO ()
+runPipeline p = void $ runWire p []
 
 main :: IO ()
-main = go $ runWire pipeline []
-  where
-    go [] = pure ()
-    go (io : ios) = io >> threadDelay 1000000 >> go ios
+main = runPipeline pipeline
