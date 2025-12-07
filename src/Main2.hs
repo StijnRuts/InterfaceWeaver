@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs #-}
+
 module Main2 (main) where
 
 import Control.Category (Category, (>>>))
@@ -26,38 +28,53 @@ instance Category Pipe where
   id = Pipe id
   (Pipe g) . (Pipe f) = Pipe (g . f)
 
+data Wire i o where
+  PipeIn :: Channel i o () -> Wire i o
+  Seqential :: Wire a b -> Wire b c -> Wire a c
+  Parallel :: Wire a b -> Wire a c -> Wire a (b, c)
+  Merge :: Wire a b -> Wire a c -> Wire a (Either b c)
+
 --
 
-producer :: Channel String String ()
+producer :: Channel () Int ()
 producer = do
-  emit "hello"
-  emit "world"
+  emit 1
+  emit 2
+  emit 3
 
-transducer :: Channel String String ()
-transducer = do
-  x1 <- await
-  emit $ toUpper <$> x1
-  x2 <- await
-  emit $ toUpper <$> x2
-
-consumer :: Channel String String ()
-consumer = do
+double :: Channel Int Int ()
+double = do
   x <- await
-  y <- await
-  emit $ "Got: " ++ x ++ " and " ++ y
+  emit $ 2 * x
+
+showStr :: Channel Int String ()
+showStr = do
+  x <- await
+  emit $ show x
+
+collector :: Channel String String ()
+collector = do
+  s <- await
+  emit $ "Collected: " ++ s
 
 --
 
-interpret :: Channel i o () -> Pipe i o
-interpret (Pure ()) = Pipe (const [])
-interpret (Free (Emit x next)) = let Pipe f = interpret next in Pipe (\xs -> x : f xs)
-interpret (Free (Await next')) = Pipe (\(x : xs) -> let Pipe f = interpret (next' x) in f xs)
+runChannel :: Channel i o () -> Pipe i o
+runChannel (Pure ()) = Pipe (const [])
+runChannel (Free (Emit x next)) = let Pipe f = runChannel next in Pipe (\xs -> x : f xs)
+runChannel (Free (Await next')) = Pipe (\(x : xs) -> let Pipe f = runChannel (next' x) in f xs)
 
-pipeline :: Pipe String String
-pipeline = interpret producer >>> interpret transducer >>> interpret consumer
+runWire :: Wire i o -> [i] -> [o]
+runWire (PipeIn ch) is = runPipe (runChannel ch) is
+runWire (Seqential w1 w2) is = runWire w2 (runWire w1 is)
+runWire (Parallel w1 w2) is = zip (runWire w1 is) (runWire w2 is)
+runWire (Merge w1 w2) is = map Left (runWire w1 is) ++ map Right (runWire w2 is)
 
-result :: [String]
-result = runPipe pipeline []
+pipeline :: Wire () (Either Int String)
+pipeline =
+  Seqential
+    (PipeIn producer)
+    (Merge (PipeIn double) (PipeIn showStr))
 
 main :: IO ()
-main = print result
+main = print $ runWire pipeline []
