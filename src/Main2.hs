@@ -1,42 +1,57 @@
 module Main2 (main) where
 
 import Control.Monad.Free
+import Data.Char (toUpper)
 
 --
 
-data OutputF next = Output String next
+data ChannelF next
+  = Emit String next
+  | Await (String -> next)
   deriving (Functor)
 
-type OutputProg = Free OutputF
+type Channel = Free ChannelF
 
-output :: String -> OutputProg ()
-output o = liftF $ Output o ()
+emit :: String -> Channel ()
+emit v = liftF $ Emit v ()
 
-data InputF next = Input (String -> next)
-  deriving (Functor)
-
-type InputProg = Free InputF
-
-input :: InputProg String
-input = liftF $ Input id
+await :: Channel String
+await = liftF $ Await id
 
 --
 
-producer :: OutputProg ()
+producer :: Channel ()
 producer = do
-  output "hello"
-  output "world"
+  emit "hello"
+  emit "world"
 
-consumer :: InputProg [String]
+transducer :: Channel ()
+transducer = do
+  x1 <- await
+  emit $ toUpper <$> x1
+  x2 <- await
+  emit $ toUpper <$> x2
+
+consumer :: Channel ()
 consumer = do
-  a <- input
-  b <- input
-  pure [a, b]
+  x <- await
+  y <- await
+  emit $ "Got: " ++ x ++ " and " ++ y
 
-runTogether :: OutputProg a -> InputProg b -> (a, b)
-runTogether (Pure a) (Pure b) = (a, b)
-runTogether (Free (Output s next)) (Free (Input f)) = runTogether next (f s)
-runTogether _ _ = error "Mismatched programs"
+--
+
+chain :: Channel () -> Channel () -> Channel ()
+chain (Pure ()) (Pure ()) = Pure ()
+chain (Free (Emit s next)) (Free (Await f)) = chain next (f s)
+chain left (Free (Emit s' next')) = Free $ Emit s' $ chain left next'
+chain (Free (Await _)) _ = error "Could not chain from Await"
+chain (Pure _) _ = error "Left pipeline ran out"
+chain _ (Pure _) = error "Right pipeline ran out"
+
+output :: Channel () -> IO ()
+output (Pure _) = pure ()
+output (Free (Emit s next)) = putStrLn s >> output next
+output (Free (Await _)) = error "Could not output on Await"
 
 main :: IO ()
-main = print $ runTogether producer consumer
+main = output $ producer `chain` transducer `chain` consumer
