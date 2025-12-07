@@ -1,5 +1,7 @@
 module Main2 (main) where
 
+import Control.Category (Category, (>>>))
+import qualified Control.Category as C
 import Control.Monad.Free
 import Data.Char (toUpper)
 
@@ -17,6 +19,12 @@ emit v = liftF $ Emit v ()
 
 await :: Channel String
 await = liftF $ Await id
+
+newtype Pipe a b = Pipe {runPipe :: [a] -> [b]}
+
+instance Category Pipe where
+  id = Pipe id
+  (Pipe g) . (Pipe f) = Pipe (g . f)
 
 --
 
@@ -40,18 +48,16 @@ consumer = do
 
 --
 
-chain :: Channel () -> Channel () -> Channel ()
-chain (Pure ()) (Pure ()) = Pure ()
-chain (Free (Emit s next)) (Free (Await f)) = chain next (f s)
-chain left (Free (Emit s' next')) = Free $ Emit s' $ chain left next'
-chain (Free (Await _)) _ = error "Could not chain from Await"
-chain (Pure _) _ = error "Left pipeline ran out"
-chain _ (Pure _) = error "Right pipeline ran out"
+interpret :: Channel () -> Pipe String String
+interpret (Pure ()) = Pipe id
+interpret (Free (Emit s next)) = let Pipe f = interpret next in Pipe (\xs -> s : f xs)
+interpret (Free (Await k)) = Pipe (\(x : xs) -> let Pipe f = interpret (k x) in f xs)
 
-output :: Channel () -> IO ()
-output (Pure _) = pure ()
-output (Free (Emit s next)) = putStrLn s >> output next
-output (Free (Await _)) = error "Could not output on Await"
+pipeline :: Pipe String String
+pipeline = interpret producer >>> interpret transducer >>> interpret consumer
+
+result :: [String]
+result = runPipe pipeline []
 
 main :: IO ()
-main = output $ producer `chain` transducer `chain` consumer
+main = print result
