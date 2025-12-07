@@ -71,7 +71,8 @@ runWire :: Wire i o -> [i] -> [o]
 runWire (FromTransducer ch) is = runTransducer ch is
 runWire (Seqential w1 w2) is = runWire w2 (runWire w1 is)
 runWire (Parallel w1 w2) is = zip (runWire w1 is) (runWire w2 is)
-runWire (Merge w1 w2) is = map Left (runWire w1 is) ++ map Right (runWire w2 is)
+runWire (Merge w1 w2) [] = []
+runWire (Merge w1 w2) (i : is) = map Left (runWire w1 [i]) ++ map Right (runWire w2 [i]) ++ runWire (Merge w1 w2) is
 
 pipeline :: Wire Void (Either Int String)
 pipeline =
