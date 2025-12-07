@@ -4,6 +4,7 @@ module Main2 (main) where
 
 import Control.Category (Category, (>>>))
 import qualified Control.Category as C
+import Control.Monad (forever)
 import Control.Monad.Free
 import Data.Char (toUpper)
 import Data.Void
@@ -44,26 +45,27 @@ producer = do
   emit 3
 
 double :: Transducer Int Int
-double = do
+double = forever $ do
   x <- await
   emit $ 2 * x
 
 showStr :: Transducer Int String
-showStr = do
+showStr = forever $ do
   x <- await
   emit $ show x
 
 collector :: Transducer String String
-collector = do
+collector = forever $ do
   s <- await
   emit $ "Collected: " ++ s
 
 --
 
 runTransducer :: Transducer i o -> [i] -> [o]
-runTransducer (Pure ()) = const []
-runTransducer (Free (Emit x next)) = let f = runTransducer next in (\xs -> x : f xs)
-runTransducer (Free (Await next')) = (\(x : xs) -> let f = runTransducer (next' x) in f xs)
+runTransducer (Pure ()) _ = []
+runTransducer (Free (Emit x next)) xs = x : runTransducer next xs
+runTransducer (Free (Await next)) [] = [] -- no more input, stop
+runTransducer (Free (Await next)) (x : xs) = runTransducer (next x) xs
 
 runWire :: Wire i o -> [i] -> [o]
 runWire (FromTransducer ch) is = runTransducer ch is
