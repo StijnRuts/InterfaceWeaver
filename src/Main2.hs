@@ -12,89 +12,61 @@ import Data.Void
 
 --
 
-data ChannelF m i o next
-  = Emit o next
-  | Await (i -> next)
-  | LiftM (m next)
-  deriving (Functor)
+data Channel m i o
+  = Output o (Channel m i o)
+  | Input (i -> (Channel m i o))
+  | forall a. LiftM (m a) (a -> Channel m i o)
 
-type Channel m i o = Free (ChannelF m i o)
+type Producer m o = Channel m Void o
+type Consumer m i = Channel m i Void
 
-type Transducer m i o = Channel m i o ()
+data Graph m i o
+  = Embed (Channel m i o) -- Graph m i o
+  | forall x. Sequential (Graph m i x) (Graph m x o) -- Graph m i o
+  -- | forall a b. Parallel o (a -> o -> o) (b -> o -> o) (Graph m i a) (Graph m i b) -- Graph m i o
+  -- APPEND :: (a -> _ -> a, _ -> a -> a)
+  -- SUM :: (a -> _ -> Left a, b -> _ -> Right b)
+  -- PRODUCT :: (a -> (_,b) -> (a,b), b -> (a,_) -> (a,b))
 
-type Producer m o = Transducer m Void o
+runChannel :: Monad m => Channel m Void Void -> m ()
+runChannel (Output _ _) = error "This should not happen" -- because of Void
+runChannel (Input _) = error "This should not happen" -- because of Void
+runChannel (LiftM ma f) = runChannel . f =<< ma
 
-type Consumer m i = Transducer m i Void
+flattenGraph :: Graph m i o -> Channel m i o
+flattenGraph (Embed channel) = channel
+flattenGraph (Sequential graph1 graph2) = sequential (flattenGraph graph1) (flattenGraph graph2)
 
-emit :: (Functor m) => o -> Channel m i o ()
-emit o = liftF $ Emit o ()
-
-await :: (Functor m) => Channel m i o i
-await = liftF $ Await id
-
-liftM :: (Functor m) => m a -> Channel m i o a
-liftM action = liftF $ LiftM action
-
-data Wire m i o where
-  FromTransducer :: Transducer m i o -> Wire m i o
-  Seqential :: Wire m a b -> Wire m b c -> Wire m a c
-
--- Parallel :: Wire m a b -> Wire m a c -> Wire m a (b, c)
--- Merge :: Wire m a b -> Wire m a c -> Wire m a (Either b c)
+sequential :: Channel m i x -> Channel m x o -> Channel m i o
+sequential (Output x next) (Input f) = sequential next (f x)
+sequential (Input f) right = Input (\i -> sequential (f i) right)
+sequential left (Output o next) = Output o $ sequential left next
+sequential (LiftM ma f) right = LiftM ma (\a -> sequential (f a) right)
+sequential left (LiftM ma f) = LiftM ma (\a -> sequential left (f a))
 
 --
-
-{-
-producer ::  Producer IO Int
-producer = mapM_ (\f -> emit f >> liftM (threadDelay 1000000)) fibs
-  where
-    fibs = 0 : 1 : zipWith (+) fibs (drop 1 fibs)
--}
 
 producer :: Producer IO Int
-producer = do
-  emit 1
-  liftM $ threadDelay 1000000
-  emit 2
-  liftM $ threadDelay 1000000
-  emit 3
-  liftM $ threadDelay 1000000
-  emit 4
-  liftM $ threadDelay 1000000
-  emit 5
+producer = go fibs
+  where
+    go (n : rest) = Output n $ LiftM (threadDelay 1000000) (\() -> go rest)
+    fibs = 0 : 1 : zipWith (+) fibs (drop 1 fibs)
 
-double :: (Functor m) => Transducer m Int Int
-double = forever $ emit . (2 *) =<< await
+double :: Channel m Int Int
+double = Input (\i -> Output (2*i) double)
 
-showStr :: (Functor m, Show s) => Transducer m s String
-showStr = forever $ emit . show =<< await
+showStr :: (Show s) => Channel m s String
+showStr = Input (\i -> Output (show i) showStr)
 
-collector :: Consumer IO String
-collector = forever $ liftM . putStrLn =<< await
+consumer :: Consumer IO String
+consumer = Input (\s -> LiftM (putStrLn s) (\() -> consumer))
 
 --
 
-runChannel :: (Monad m) => Channel m i o () -> [i] -> m [o]
-runChannel (Pure ()) _ = return []
-runChannel (Free (Emit o next)) is = (o :) `fmap` runChannel next is
-runChannel (Free (Await next)) [] = return []
-runChannel (Free (Await next)) (i : is) = runChannel (next i) is
-runChannel (Free (LiftM mNext)) is = flip runChannel is =<< mNext
-
-runWire :: (Monad m) => Wire m i o -> [i] -> m [o]
-runWire (FromTransducer ch) is = runChannel ch is
-runWire (Seqential w1 w2) is = runWire w2 =<< runWire w1 is
-
-pipeline :: Wire IO Void Void
-pipeline =
-  Seqential (FromTransducer producer) $
-    Seqential (FromTransducer double) $
-      Seqential
-        (FromTransducer showStr)
-        (FromTransducer collector)
-
-runPipeline :: Wire IO Void Void -> IO ()
-runPipeline p = void $ runWire p []
-
 main :: IO ()
-main = runPipeline pipeline
+main = runChannel $ flattenGraph $
+  Sequential (Embed producer) $
+    Sequential (Embed double) $
+      Sequential
+        (Embed showStr)
+        (Embed consumer)
