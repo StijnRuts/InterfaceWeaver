@@ -23,7 +23,7 @@ type Transducer i o = Channel i o ()
 
 type Producer o = Transducer Void o
 
-type Consumer i = Transducer i Void
+type Consumer i = Transducer i (IO ())
 
 emit :: o -> Channel i o ()
 emit o = liftF $ Emit o ()
@@ -54,10 +54,10 @@ showStr = forever $ do
   x <- await
   emit $ show x
 
-collector :: Transducer String String
+collector :: Consumer String
 collector = forever $ do
   s <- await
-  emit $ "Collected: " ++ s
+  emit $ putStrLn s
 
 --
 
@@ -74,14 +74,15 @@ runWire (Parallel w1 w2) is = zip (runWire w1 is) (runWire w2 is)
 runWire (Merge w1 w2) [] = []
 runWire (Merge w1 w2) (i : is) = map Left (runWire w1 [i]) ++ map Right (runWire w2 [i]) ++ runWire (Merge w1 w2) is
 
-pipeline :: Wire Void (Either Int String)
+pipeline :: Wire Void (IO ())
 pipeline =
-  Seqential
-    (FromTransducer producer)
-    (Merge (FromTransducer double) (FromTransducer showStr))
+  Seqential (FromTransducer producer)
+    $ Seqential (FromTransducer double)
+      $ Seqential (FromTransducer showStr)
+         (FromTransducer collector)
 
 main :: IO ()
 main = go $ runWire pipeline []
   where
     go [] = pure ()
-    go (x : xs) = print x >> threadDelay 1000000 >> go xs
+    go (io : ios) = io >> threadDelay 1000000 >> go ios
