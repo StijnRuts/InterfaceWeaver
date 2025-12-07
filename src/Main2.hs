@@ -4,6 +4,7 @@ module Main2 (main) where
 
 import Control.Category (Category, (>>>))
 import qualified Control.Category as C
+import Control.Concurrent (threadDelay)
 import Control.Monad (forever)
 import Control.Monad.Free
 import Data.Char (toUpper)
@@ -39,10 +40,9 @@ data Wire i o where
 --
 
 producer :: Producer Int
-producer = do
-  emit 1
-  emit 2
-  emit 3
+producer = go 1
+  where
+    go n = emit n >> go (n + 1)
 
 double :: Transducer Int Int
 double = forever $ do
@@ -81,4 +81,7 @@ pipeline =
     (Merge (FromTransducer double) (FromTransducer showStr))
 
 main :: IO ()
-main = print $ runWire pipeline []
+main = go $ runWire pipeline []
+  where
+    go [] = pure ()
+    go (x : xs) = print x >> threadDelay 1000000 >> go xs
