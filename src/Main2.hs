@@ -8,33 +8,44 @@ import Control.Concurrent (threadDelay)
 import Control.Monad (forever, void)
 import Control.Monad.Free
 import Data.Char (toUpper)
+import Data.Functor (($>), (<&>))
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Void
+import System.Random
 
 --
 
 data Channel m i o
   = Output o (Channel m i o)
   | Input (i -> Channel m i o)
-  | forall a. LiftM (m a) (a -> Channel m i o)
-  | forall a b. LiftM2 (m a) (m b) (a -> b -> Channel m i o)
+  | Actions (ActionsList m i o)
+  | forall x. Sequential (Channel m i x) (Channel m x o)
+  | forall s a b. Parallel (Merge s a b o) (Channel m i o) (Channel m i o)
 
 type Producer m o = Channel m Void o
 
 type Consumer m i = Channel m i Void
 
-data Graph m i o
-  = Embed (Channel m i o)
-  | forall x. Sequential (Graph m i x) (Graph m x o)
-  | forall a b s. Parallel (Merge a b s o) (Graph m i a) (Graph m i b)
+data ActionsList m i o
+  = Single (m (Channel m i o))
+  | forall i1 o1 i2 o2. Chain
+      (Channel m i1 o1 -> Channel m i2 o2 -> Channel m i o)
+      (ActionsList m i1 o1)
+      (ActionsList m i2 o2)
 
-data Merge a b s o = Merge
+runActionsList :: ActionsList m i o -> m (Channel m i o)
+runActionsList (Single mChannel) = mChannel
+runActionsList (Chain merge left right) = merge <$> runActionsList left <*> runActionsList right
+
+data Merge s a b o = Merge
   { initialState :: s,
     getState :: o -> s,
     inputA :: s -> a -> o,
     inputB :: s -> b -> o
   }
 
-statelessMerge :: (a -> o) -> (b -> o) -> Merge a b () o
+statelessMerge :: (a -> o) -> (b -> o) -> Merge () a b o
 statelessMerge fa fb =
   Merge
     { initialState = (),
@@ -43,13 +54,13 @@ statelessMerge fa fb =
       inputB = const fb
     }
 
-sumMerge :: Merge a b () (Either a b)
+sumMerge :: Merge () a b (Either a b)
 sumMerge = statelessMerge Left Right
 
-appendMerge :: Merge a a () a
+appendMerge :: Merge () a a a
 appendMerge = statelessMerge id id
 
-productMerge :: a -> b -> Merge a b (a, b) (a, b)
+productMerge :: a -> b -> Merge (a, b) a b (a, b)
 productMerge initA initB =
   Merge
     { initialState = (initA, initB),
@@ -58,7 +69,7 @@ productMerge initA initB =
       inputB = (,) . fst
     }
 
-monoidMerge :: (Monoid a, Monoid b) => Merge a b (a, b) (a, b)
+monoidMerge :: (Monoid a, Monoid b) => Merge (a, b) a b (a, b)
 monoidMerge = productMerge mempty mempty
 
 --
@@ -66,24 +77,19 @@ monoidMerge = productMerge mempty mempty
 runChannel :: (Monad m) => Channel m Void Void -> m ()
 runChannel (Output _ _) = error "This should not happen" -- because of Void
 runChannel (Input _) = error "This should not happen" -- because of Void
-runChannel (LiftM ma f) = runChannel . f =<< ma
-runChannel (LiftM2 ma mb f) = (mb >>=) . (runChannel .) . f =<< ma
-
-flattenGraph :: Graph m i o -> Channel m i o
-flattenGraph (Embed channel) = channel
-flattenGraph (Sequential graph1 graph2) = sequential (flattenGraph graph1) (flattenGraph graph2)
-flattenGraph (Parallel merge graph1 graph2) = parallel merge (flattenGraph graph1) (flattenGraph graph2)
+runChannel (Actions actions) = runChannel =<< runActionsList actions
+runChannel (Sequential left right) = runChannel $ sequential left right
+runChannel (Parallel merge left right) = runChannel $ parallel merge left right
 
 sequential :: Channel m i x -> Channel m x o -> Channel m i o
 sequential (Output x next) (Input f) = sequential next (f x)
 sequential (Input f) right = Input (\i -> sequential (f i) right)
 sequential left (Output o next) = Output o $ sequential left next
-sequential (LiftM ma f) right = LiftM ma (\a -> sequential (f a) right)
-sequential left (LiftM ma f) = LiftM ma (\a -> sequential left (f a))
-sequential (LiftM2 ma mb f) right = LiftM2 ma mb (\a b -> sequential (f a b) right)
-sequential left (LiftM2 ma mb f) = LiftM2 ma mb (\a b -> sequential left (f a b))
+sequential (Actions left) (Actions right) = Actions $ Chain sequential left right
+sequential (Actions left) right = _
+sequential left (Actions right) = _
 
-parallel :: Merge a b s o -> Channel m i a -> Channel m i b -> Channel m i o
+parallel :: Merge s a b o -> Channel m i a -> Channel m i b -> Channel m i o
 parallel (Merge {initialState, getState, inputA, inputB}) = parallel' initialState
   where
     parallel' s (Input f1) (Input f2) = Input (\i -> parallel' s (f1 i) (f2 i))
@@ -97,39 +103,30 @@ parallel (Merge {initialState, getState, inputA, inputB}) = parallel' initialSta
     parallel' s left (Output b next) =
       let o = inputB s b
        in Output o $ parallel' (getState o) left next
-    parallel' s (LiftM ma fa) (LiftM mb fb) = LiftM2 ma mb (\a b -> parallel' s (fa a) (fb b))
-    parallel' s (LiftM ma fa) right = LiftM ma (\a -> parallel' s (fa a) right)
-    parallel' s left (LiftM mb fb) = LiftM mb (\b -> parallel' s left (fb b))
-    parallel' s (LiftM2 ma mb f) right = LiftM2 ma mb (\a b -> parallel' s (f a b) right)
-    parallel' s left (LiftM2 ma mb f) = LiftM2 ma mb (\a b -> parallel' s left (f a b))
+    parallel' s (Actions left) (Actions right) = Actions $ Chain (parallel' s) left right
+    parallel' s (Actions left) right = _
+    parallel' s left (Actions right) = _
 
 --
 
-producer :: Producer IO Int
-producer = go fibs
+fibProducer :: Producer IO Int
+fibProducer = go fibs
   where
     go [] = error "This should not happen" -- because there are infinite Fibonacci numbers
-    go (n : rest) = Output n $ LiftM (threadDelay 1000000) (\() -> go rest)
+    go (n : rest) = Output n $ Actions $ Single (threadDelay 1000000 $> go rest)
     fibs = 0 : 1 : zipWith (+) fibs (drop 1 fibs)
+
+randomProducer :: Producer IO Int
+randomProducer = Actions $ Single (threadDelay 1000000 >> randomIO <&> \n -> Output n randomProducer)
 
 double :: Channel m Int Int
 double = Input (\i -> Output (2 * i) double)
 
-showStr :: (Show s) => Channel m s String
-showStr = Input (\i -> Output (show i) showStr)
 
-consumer :: Consumer IO String
-consumer = Input (\s -> LiftM (putStrLn s) (\() -> consumer))
+printer :: (Show s) => Consumer IO s
+printer = Input (\s -> Actions $ Single (print s $> printer))
 
 --
 
 main :: IO ()
-main =
-  runChannel $
-    flattenGraph $
-      Sequential (Embed producer) $
-        Sequential (Embed double) $
-          Sequential
-            (Embed showStr)
-            (Embed consumer)
-
+main = runChannel $ Sequential randomProducer printer

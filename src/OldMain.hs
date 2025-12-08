@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Main (main) where
+module OldMain (main) where
 
 {- HLint ignore "Redundant <&>" -}
 {- HLint ignore "Functor law" -}
