@@ -14,8 +14,8 @@ import System.Random (randomIO)
 --
 
 data Channel m i o
-  = Output o (Channel m i o)
-  | Input (i -> Channel m i o)
+  = Output o (m (Channel m i o))
+  | Input (i -> m (Channel m i o))
   | Action (m (Channel m i o))
 
 data Graph m i o
@@ -86,9 +86,20 @@ flatten (Parallel left right) = do
   parallel l r
 
 sequential :: (Monad m) => Channel m i x -> Channel m x o -> m (Channel m i o)
-sequential (Output x next) (Input f) = sequential next (f x)
--- sequential (Input f) right = return $ Input (\i -> Sequential (f i) right)
-sequential left (Output o next) = Output o <$> sequential left next
+sequential (Output x next) (Input f) = do
+  left <- next
+  right <- f x
+  sequential left right
+sequential (Input f) right =
+  return $
+    Input
+      ( \i -> do
+          left <- f i
+          sequential left right
+      )
+sequential left (Output o next) = return $ Output o $ do
+  right <- next
+  sequential left right
 sequential (Action lAction) (Action rAction) = do
   left <- lAction
   right <- rAction
@@ -101,10 +112,24 @@ sequential left (Action rAction) = do
   sequential left right
 
 parallel :: (Monad m) => Channel m i o -> Channel m i o -> m (Channel m i o)
--- parallel (Input f1) (Input f2) = return $ Input (\i -> Parallel (f1 i) (f2 i))
-parallel (Output o1 left) (Output o2 right) = Output o1 . Output o2 <$> parallel left right
-parallel (Output o next) right = Output o <$> parallel next right
-parallel left (Output o next) = Output o <$> parallel left next
+parallel (Input f1) (Input f2) =
+  return $
+    Input
+      ( \i -> do
+          left <- f1 i
+          right <- f2 i
+          parallel left right
+      )
+parallel (Output o1 lNext) (Output o2 rNext) = do
+  left <- lNext
+  right <- rNext
+  return $ Output o1 $ return $ Output o2 $ parallel left right
+parallel (Output o next) right = do
+  left <- next
+  return $ Output o $ parallel left right
+parallel left (Output o next) = do
+  right <- next
+  return $ Output o $ parallel left right
 parallel (Action lAction) (Action rAction) = do
   left <- lAction
   right <- rAction
@@ -122,21 +147,21 @@ fibProducer :: Producer IO Int
 fibProducer = go fibs
   where
     go [] = error "This should not happen" -- because there are infinite Fibonacci numbers
-    go (n : rest) = Output n $ Action $ threadDelay 1500000 $> go rest
+    go (n : rest) = Output n $ return $ Action $ threadDelay 1500000 $> go rest
     fibs = 0 : 1 : zipWith (+) fibs (drop 1 fibs)
 
 randomProducer :: Producer IO Int
-randomProducer = Action $ threadDelay 1000000 >> randomIO <&> \n -> Output n randomProducer
+randomProducer = Action $ threadDelay 1000000 >> randomIO <&> \n -> Output n (return randomProducer)
 
-double :: Channel m Int Int
-double = Input (\i -> Output (2 * i) double)
+double :: (Monad m) => Channel m Int Int
+double = Input (\i -> return $ Output (2 * i) (return double))
 
 
 printer :: (Show s) => Consumer IO s
-printer = Input (\s -> Action $ print s $> printer)
+printer = Input (\s -> return $ Action $ print s $> printer)
 
 program :: Program IO
-program = Sequential (Embed randomProducer) (Embed printer)
+program = Sequential (Sequential (Embed fibProducer) (Embed double)) (Embed printer)
 
 main :: IO ()
 main = runFinal =<< flatten program
