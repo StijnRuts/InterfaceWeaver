@@ -2,12 +2,11 @@
 
 module Main (main) where
 
--- import Control.Category (Category, (>>>))
--- import qualified Control.Category as C
+import Control.Category
 import Control.Concurrent (threadDelay)
 -- import Control.Monad (forever, void)
--- import Control.Monad.Free
 import Data.Functor (($>), (<&>))
+import Data.Profunctor
 import Data.Void
 import System.Random (randomIO)
 
@@ -17,11 +16,99 @@ data Channel m i o
   = Output o (m (Channel m i o))
   | Input (i -> m (Channel m i o))
   | Action (m (Channel m i o))
+  | Stop
+
+instance (Functor m) => Functor (Channel m i) where
+  fmap :: (o -> o') -> Channel m i o -> Channel m i o'
+  fmap = rmap
+
+instance (Functor m) => Profunctor (Channel m) where
+  lmap :: (i' -> i) -> Channel m i o -> Channel m i' o
+  lmap f (Output o next) = Output o $ lmap f <$> next
+  lmap f (Input next) = Input (\i' -> lmap f <$> next (f i'))
+  lmap f (Action next) = Action $ lmap f <$> next
+  lmap _ Stop = Stop
+
+  rmap :: (o -> o') -> Channel m i o -> Channel m i o'
+  rmap f (Output o next) = Output (f o) $ rmap f <$> next
+  rmap f (Input next) = Input (\i -> rmap f <$> next i)
+  rmap f (Action next) = Action $ rmap f <$> next
+  rmap _ Stop = Stop
+
+instance (Monad m) => Applicative (Channel m i) where
+  pure :: o -> Channel m i o
+  pure o = Output o $ return (pure o)
+
+  (<*>) :: Channel m i (o -> o') -> Channel m i o -> Channel m i o'
+  (Output f left) <*> (Output o right) = Output (f o) (liftA2 (<*>) left right)
+  (Action left) <*> (Action right) = Action (liftA2 (<*>) left right)
+  (Action left) <*> right = Action (liftA2 (<*>) left (pure right))
+  left <*> (Action right) = Action (liftA2 (<*>) (pure left) right)
+  (Input lNext) <*> (Input rNext) = Input (\i -> liftA2 (<*>) (lNext i) (rNext i))
+  (Input lNext) <*> right = Input (\i -> liftA2 (<*>) (lNext i) (pure right))
+  left <*> (Input rNext) = Input (\i -> liftA2 (<*>) (pure left) (rNext i))
+  Stop <*> Stop = Stop
+  Stop <*> (Output _ _) = Stop
+  (Output _ _) <*> Stop = Stop
+
+instance (Monad m) => Monad (Channel m i) where
+  return :: o -> Channel m i o
+  return = pure
+
+  (>>=) :: Channel m i o -> (o -> Channel m i o') -> Channel m i o'
+  (Output o lNext) >>= f = cont (f o)
+    where
+      cont (Output o' rNext) = Output o' (cont <$> rNext)
+      cont (Input rNext) = Input (\i -> cont <$> rNext i)
+      cont (Action rNext) = Action (cont <$> rNext)
+      cont Stop = Action (fmap (>>= f) lNext)
+  (Input next) >>= f = Input (\i -> fmap (>>= f) (next i))
+  (Action next) >>= f = Action (fmap (>>= f) next)
+  Stop >>= _ = Stop
+
+--
 
 data Graph m i o
   = Embed (Channel m i o)
   | forall x. Sequential (Graph m i x) (Graph m x o)
   | Parallel (Graph m i o) (Graph m i o)
+
+instance (Functor m) => Functor (Graph m i) where
+  fmap :: (o -> o') -> Graph m i o -> Graph m i o'
+  fmap = rmap
+
+instance (Functor m) => Profunctor (Graph m) where
+  lmap :: (i' -> i) -> Graph m i o -> Graph m i' o
+  lmap f (Embed channel) = Embed (lmap f channel)
+  lmap f (Sequential left right) = Sequential (lmap f left) right
+  lmap f (Parallel left right) = Parallel (lmap f left) (lmap f right)
+
+  rmap :: (o -> o') -> Graph m i o -> Graph m i o'
+  rmap f (Embed channel) = Embed (rmap f channel)
+  rmap f (Sequential left right) = Sequential left (rmap f right)
+  rmap f (Parallel left right) = Parallel (rmap f left) (rmap f right)
+
+instance Semigroup (Graph m i o) where
+  (<>) :: Graph m i o -> Graph m i o -> Graph m i o
+  (<>) = Parallel
+
+instance Monoid (Graph m i o) where
+  mempty :: Graph m i o
+  mempty = Embed Stop
+
+instance (Monad m) => Category (Graph m) where
+  id :: Graph m a a
+  id = Embed $ id'
+    where
+      id' = Input (\a -> return $ Output a (return id'))
+
+  (.) :: Graph m x o -> Graph m i x -> Graph m i o
+  (.) = flip Sequential
+
+{-
+-}
+
+--
 
 type Producer m o = Channel m Void o
 
@@ -30,6 +117,8 @@ type Consumer m i = Channel m i Void
 type Final m = Channel m Void Void
 
 type Program m = Graph m Void Void
+
+--
 
 {-
 data Merge s a b o = Merge
@@ -73,6 +162,7 @@ runFinal :: (Monad m) => Final m -> m ()
 runFinal (Output _ _) = error "This should not happen" -- because of Void
 runFinal (Input _) = error "This should not happen" -- because of Void
 runFinal (Action mChannel) = runFinal =<< mChannel
+runFinal Stop = return ()
 
 flatten :: (Monad m) => Graph m i o -> m (Channel m i o)
 flatten (Embed channel) = return channel
@@ -127,7 +217,7 @@ parallel (Output o1 lNext) (Output o2 rNext) = do
 parallel (Output o next) right = do
   left <- next
   return $ Output o $ parallel left right
-parallel left (Output o next) = do
+parallel left (Output o next) = {- HLint ignore -} do
   right <- next
   return $ Output o $ parallel left right
 parallel (Action lAction) (Action rAction) = do
