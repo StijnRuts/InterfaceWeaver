@@ -2,13 +2,12 @@
 
 module Main (main) where
 
-import Control.Category (Category)
+import Control.Category (Category, (>>>))
 import qualified Control.Category as C
 import Control.Concurrent (threadDelay)
-import Control.Monad (forever, when)
+import Control.Monad (forever)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Free
-import Data.Functor (($>), (<&>))
 import Data.Profunctor
 import Data.Void
 import System.Random (randomRIO)
@@ -24,55 +23,10 @@ data ChannelF i o next
 type ChannelT i o m a = FreeT (ChannelF i o) m a
 
 output :: (Monad m) => o -> ChannelT i o m ()
-output o = liftF (Output o ())
+output o = liftF $ Output o ()
 
 input :: (Monad m) => ChannelT i o m i
-input = liftF (Input id)
-
---
-
-fiveProducer :: ChannelT Void Int IO ()
-fiveProducer = do
-  output 1
-  lift $ threadDelay 1000000
-  output 2
-  lift $ threadDelay 1000000
-  output 3
-  lift $ threadDelay 1000000
-  output 4
-  lift $ threadDelay 1000000
-  output 5
-
-fibProducer :: ChannelT Void Int IO ()
-fibProducer = go 0 1
-  where
-    go a b = do
-      output a
-      lift $ threadDelay 1000000
-      go b (a + b)
-
-randomProducer :: ChannelT Void Int IO ()
-randomProducer = forever $ do
-  n <- lift $ randomRIO (0, 999)
-  output n
-  lift $ threadDelay 1000000
-
-transform :: (Monad m) => (a -> b) -> ChannelT a b m ()
-transform f = forever $ do
-  a <- input
-  output (f a)
-
-matching :: (Monad m) => (a -> Bool) -> ChannelT a a m ()
-matching predicate = forever $ do
-  a <- input
-  when (predicate a) (output a)
-
-printer :: (Show s) => ChannelT s Void IO ()
-printer = forever $ do
-  s <- input
-  lift $ print s
-
---
+input = liftF $ Input id
 
 data Graph m a i o
   = Embed (ChannelT i o m a)
@@ -111,14 +65,64 @@ instance (Monad m) => Filterable (Graph m a i) where
     where
       mapMaybeChanT :: (o -> Maybe o') -> ChannelT i o m a -> ChannelT i o' m a
       mapMaybeChanT p chan = FreeT $ do
-        step <- runFreeT chan
-        case step of
-          Pure a ->  pure $ Pure a
+        chanF <- runFreeT chan
+        case chanF of
+          Pure a -> pure $ Pure a
           Free (Input next) -> pure $ Free $ Input $ \i -> mapMaybeChanT p (next i)
           Free (Output o next) ->
             case p o of
               Just o' -> pure $ Free $ Output o' $ mapMaybeChanT p next
               Nothing -> runFreeT $ mapMaybeChanT p next
+
+--
+
+runChannel :: (Monad m) => (o -> m ()) -> m i -> ChannelT i o m a -> m a
+runChannel put get channel = go channel
+  where
+    go chan = do
+      step <- runFreeT chan
+      case step of
+        Pure a -> pure a
+        Free (Output o next) -> put o >> go next
+        Free (Input next) -> go . next =<< get
+
+runChannel_ :: (Monad m) => ChannelT Void Void m a -> m a
+runChannel_ = runChannel (error "Can't output Void") (error "Can't input Void")
+
+runGraph :: (Monad m) => (o -> m ()) -> m i -> Graph m a i o -> m a
+runGraph put get = runChannel put get . flattenGraph
+
+runGraph_ :: (Monad m) => Graph m a Void Void -> m a
+runGraph_ = runChannel_ . flattenGraph
+
+flattenGraph :: (Monad m) => Graph m a i o -> ChannelT i o m a
+flattenGraph (Embed channel) = channel
+flattenGraph (Sequential left right) = sequential (flattenGraph left) (flattenGraph right)
+flattenGraph (Parallel left right) = parallel (flattenGraph left) (flattenGraph right)
+
+sequential :: (Monad m) => ChannelT i x m a -> ChannelT x o m a -> ChannelT i o m a
+sequential lChan rChan = FreeT $ do
+  lChanF <- runFreeT lChan
+  rChanF <- runFreeT rChan
+  case (lChanF, rChanF) of
+    (Free (Output x next), Free (Input f)) -> runFreeT $ sequential next (f x)
+    (left, Free (Output o next)) -> pure $ Free $ Output o $ sequential (FreeT $ pure left) next
+    (Free (Input f), right) -> pure $ Free $ Input $ \i -> sequential (f i) (FreeT $ pure right)
+    ((Pure _), (Pure a)) -> pure (Pure a)
+    ((Pure a), (Free (Input _))) -> pure (Pure a)
+    ((Free (Output _ _)), (Pure a)) -> pure (Pure a)
+
+parallel :: (Monad m) => ChannelT i o m a -> ChannelT i o m a -> ChannelT i o m a
+parallel lChan rChan = FreeT $ do
+  lChanF <- runFreeT lChan
+  rChanF <- runFreeT rChan
+  case (lChanF, rChanF) of
+    (Free (Input f1), Free (Input f2)) -> pure $ Free $ Input $ \i -> parallel (f1 i) (f2 i)
+    (Free (Output o1 next1), Free (Output o2 next2)) -> pure $ Free $ Output o1 $ FreeT $ pure $ Free $ Output o2 $ parallel next1 next2
+    (Free (Output o next), right) -> pure $ Free $ Output o $ parallel next (FreeT $ pure right)
+    (left, Free (Output o next)) -> pure $ Free $ Output o $ parallel (FreeT $ pure left) next
+    (left, Pure _) -> pure left
+    (Pure _, right) -> pure right
 
 --
 
@@ -156,87 +160,40 @@ productMerge initA initB =
 
 monoidMerge :: (Monoid a, Monoid b) => Merge (a, b) a b (a, b)
 monoidMerge = productMerge mempty mempty
+-}
 
 --
 
-runFinal :: (Monad m) => Final m -> m ()
-runFinal (Output _ _) = error "This should not happen" -- because of Void
-runFinal (Input _) = error "This should not happen" -- because of Void
-runFinal (Action mChannel) = runFinal =<< mChannel
-runFinal Stop = return ()
+fiveProducer :: Graph IO () Void Int
+fiveProducer = Embed $ do
+  output 1
+  lift $ threadDelay 1000000
+  output 2
+  lift $ threadDelay 1000000
+  output 3
+  lift $ threadDelay 1000000
+  output 4
+  lift $ threadDelay 1000000
+  output 5
 
-flatten :: (Monad m) => Graph m i o -> m (Channel m i o)
-flatten (Embed channel) = return channel
-flatten (Sequential left right) = do
-  l <- flatten left
-  r <- flatten right
-  sequential l r
-flatten (Parallel left right) = do
-  l <- flatten left
-  r <- flatten right
-  parallel l r
+fibProducer :: Graph IO () Void Int
+fibProducer = Embed $ go 0 1
+  where
+    go a b = do
+      output a
+      lift $ threadDelay 1000000
+      go b (a + b)
 
-sequential :: (Monad m) => Channel m i x -> Channel m x o -> m (Channel m i o)
-sequential (Output x next) (Input f) = do
-  left <- next
-  right <- f x
-  sequential left right
-sequential (Input f) right =
-  return $
-    Input
-      ( \i -> do
-          left <- f i
-          sequential left right
-      )
-sequential left (Output o next) = return $ Output o $ do
-  right <- next
-  sequential left right
-sequential (Action lAction) (Action rAction) = do
-  left <- lAction
-  right <- rAction
-  sequential left right
-sequential (Action lAction) right = do
-  left <- lAction
-  sequential left right
-sequential left (Action rAction) = do
-  right <- rAction
-  sequential left right
+randomProducer :: Graph IO () Void Int
+randomProducer = Embed $ forever $ do
+  n <- lift $ randomRIO (0, 999)
+  output n
+  lift $ threadDelay 1000000
 
-parallel :: (Monad m) => Channel m i o -> Channel m i o -> m (Channel m i o)
-parallel (Input f1) (Input f2) =
-  return $
-    Input
-      ( \i -> do
-          left <- f1 i
-          right <- f2 i
-          parallel left right
-      )
-parallel (Output o1 lNext) (Output o2 rNext) = do
-  left <- lNext
-  right <- rNext
-  return $ Output o1 $ return $ Output o2 $ parallel left right
-parallel (Output o next) right = do
-  left <- next
-  return $ Output o $ parallel left right
-parallel left (Output o next) = {- HLint ignore -} do
-  right <- next
-  return $ Output o $ parallel left right
-parallel (Action lAction) (Action rAction) = do
-  left <- lAction
-  right <- rAction
-  parallel left right
-parallel (Action lAction) right = do
-  left <- lAction
-  parallel left right
-parallel left (Action rAction) = do
-  right <- rAction
-  parallel left right
-
---
-
-program :: Program IO
-program = Sequential (Sequential (Embed fibProducer) (Embed double)) (Embed printer)
+printer :: (Show s) => Graph IO () s Void
+printer = Embed $ forever $ do
+  s <- input
+  lift $ print s
 
 main :: IO ()
-main = runFinal =<< flatten program
--}
+main = runGraph_ $ fibProducer >>> printer
