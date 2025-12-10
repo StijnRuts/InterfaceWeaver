@@ -2,15 +2,17 @@
 
 module Main (main) where
 
--- import Control.Category
+import Control.Category (Category)
+import qualified Control.Category as C
 import Control.Concurrent (threadDelay)
 import Control.Monad (forever, when)
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Free
 import Data.Functor (($>), (<&>))
 import Data.Profunctor
 import Data.Void
 import System.Random (randomRIO)
-import Control.Monad.Trans.Free
-import Control.Monad.Trans.Class
+import Witherable
 
 --
 
@@ -21,24 +23,25 @@ data ChannelF i o next
 
 type ChannelT i o m a = FreeT (ChannelF i o) m a
 
-output :: Monad m => o -> ChannelT i o m ()
+output :: (Monad m) => o -> ChannelT i o m ()
 output o = liftF (Output o ())
 
-input :: Monad m => ChannelT i o m i
+input :: (Monad m) => ChannelT i o m i
 input = liftF (Input id)
 
-{-
-newtype ChannelP m a i o = ChannelP (ChannelT i o m a)
-
-instance Profunctor (ChannelP m a) where
-  dimap fi fo (ChannelP c) = ChannelP (hoistFreeT (dimapChannelF fi fo) c)
-  where
-    dimapChannelF :: (i' -> i) -> (o -> o') -> ChannelF i o next -> ChannelF i' o' next
-    dimapChannelF _ fo (Output o next) = Output (fo o) next
-    dimapChannelF fi _ (Input next) = Input (next . fi)
--}
-
 --
+
+fiveProducer :: ChannelT Void Int IO ()
+fiveProducer = do
+  output 1
+  lift $ threadDelay 1000000
+  output 2
+  lift $ threadDelay 1000000
+  output 3
+  lift $ threadDelay 1000000
+  output 4
+  lift $ threadDelay 1000000
+  output 5
 
 fibProducer :: ChannelT Void Int IO ()
 fibProducer = go 0 1
@@ -54,12 +57,12 @@ randomProducer = forever $ do
   output n
   lift $ threadDelay 1000000
 
-transform :: Monad m => (a -> b) -> ChannelT a b m ()
+transform :: (Monad m) => (a -> b) -> ChannelT a b m ()
 transform f = forever $ do
   a <- input
   output (f a)
 
-matching :: Monad m => (a -> Bool) -> ChannelT a a m ()
+matching :: (Monad m) => (a -> Bool) -> ChannelT a a m ()
 matching predicate = forever $ do
   a <- input
   when (predicate a) (output a)
@@ -71,64 +74,61 @@ printer = forever $ do
 
 --
 
-{-
+data Graph m a i o
+  = Embed (ChannelT i o m a)
+  | forall x. Sequential (Graph m a i x) (Graph m a x o)
+  | Parallel (Graph m a i o) (Graph m a i o)
 
-data Graph m i o
-  = Embed (Channel m i o)
-  | forall x. Sequential (Graph m i x) (Graph m x o)
-  | Parallel (Graph m i o) (Graph m i o)
-
--- type Program m = Graph m Void Void
-
-instance (Functor m) => Functor (Graph m i) where
-  fmap :: (o -> o') -> Graph m i o -> Graph m i o'
-  fmap = rmap
-
-instance (Functor m) => Profunctor (Graph m) where
-  lmap :: (i' -> i) -> Graph m i o -> Graph m i' o
-  lmap f (Embed channel) = Embed (lmap f channel)
-  lmap f (Sequential left right) = Sequential (lmap f left) right
-  lmap f (Parallel left right) = Parallel (lmap f left) (lmap f right)
-
-  rmap :: (o -> o') -> Graph m i o -> Graph m i o'
-  rmap f (Embed channel) = Embed (rmap f channel)
-  rmap f (Sequential left right) = Sequential left (rmap f right)
-  rmap f (Parallel left right) = Parallel (rmap f left) (rmap f right)
-
-instance Semigroup (Graph m i o) where
-  (<>) :: Graph m i o -> Graph m i o -> Graph m i o
+instance Semigroup (Graph m a i o) where
+  (<>) :: Graph m a i o -> Graph m a i o -> Graph m a i o
   (<>) = Parallel
 
-instance Monoid (Graph m i o) where
-  mempty :: Graph m i o
-  mempty = Embed Stop
-
-instance (Monad m) => Category (Graph m) where
-  id :: Graph m a a
-  id = Embed $ id'
-    where
-      id' = Input (\a -> return $ Output a (return id'))
-
-  (.) :: Graph m x o -> Graph m i x -> Graph m i o
+instance (Monad m) => Category (Graph m a) where
+  id :: Graph m a x x
+  id = Embed $ forever $ input >>= output
+  (.) :: Graph m a x o -> Graph m a i x -> Graph m a i o
   (.) = flip Sequential
 
-{-
-class MonadTrans t where
-  lift :: Monad m => m a -> t m a
+instance (Monad m) => Functor (Graph m a i) where
+  fmap :: (o -> o') -> Graph m a i o -> Graph m a i o'
+  fmap = rmap
 
-class Monad m => MonadIO m where
-  liftIO :: IO a -> m a
--}
+instance (Monad m) => Profunctor (Graph m a) where
+  dimap :: (i' -> i) -> (o -> o') -> Graph m a i o -> Graph m a i' o'
+  dimap fi fo (Sequential left right) = Sequential (lmap fi left) (rmap fo right)
+  dimap fi fo (Parallel left right) = Parallel (dimap fi fo left) (dimap fi fo right)
+  dimap fi fo (Embed channel) = Embed (transFreeT (dimapChan fi fo) channel)
+    where
+      dimapChan :: (i' -> i) -> (o -> o') -> ChannelF i o next -> ChannelF i' o' next
+      dimapChan _ fo (Output o next) = Output (fo o) next
+      dimapChan fi _ (Input next) = Input (next . fi)
+
+instance (Monad m) => Filterable (Graph m a i) where
+  mapMaybe :: (o -> Maybe o') -> Graph m a i o -> Graph m a i o'
+  mapMaybe p (Sequential left right) = Sequential left (mapMaybe p right)
+  mapMaybe p (Parallel left right) = Parallel (mapMaybe p left) (mapMaybe p right)
+  mapMaybe p (Embed channel) = Embed (mapMaybeChanT p channel)
+    where
+      mapMaybeChanT :: (o -> Maybe o') -> ChannelT i o m a -> ChannelT i o' m a
+      mapMaybeChanT p chan = FreeT $ do
+        step <- runFreeT chan
+        case step of
+          Pure a ->  pure $ Pure a
+          Free (Input next) -> pure $ Free $ Input $ \i -> mapMaybeChanT p (next i)
+          Free (Output o next) ->
+            case p o of
+              Just o' -> pure $ Free $ Output o' $ mapMaybeChanT p next
+              Nothing -> runFreeT $ mapMaybeChanT p next
 
 --
 
 {-
 data Merge s a b o = Merge
-{ initialState :: s,
-  getState :: o -> s,
+  { initialState :: s,
+    getState :: o -> s,
     inputA :: s -> a -> o,
     inputB :: s -> b -> o
-}
+  }
 
 statelessMerge :: (a -> o) -> (b -> o) -> Merge () a b o
 statelessMerge fa fb =
@@ -156,7 +156,6 @@ productMerge initA initB =
 
 monoidMerge :: (Monoid a, Monoid b) => Merge (a, b) a b (a, b)
 monoidMerge = productMerge mempty mempty
--}
 
 --
 

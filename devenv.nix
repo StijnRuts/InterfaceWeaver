@@ -8,6 +8,7 @@
       free
       hspec
       network-bsd
+      witherable
       QuickCheck
     ]);
   };
