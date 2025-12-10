@@ -2,76 +2,83 @@
 
 module Main (main) where
 
-import Control.Category
+-- import Control.Category
 import Control.Concurrent (threadDelay)
--- import Control.Monad (forever, void)
+import Control.Monad (forever, when)
 import Data.Functor (($>), (<&>))
 import Data.Profunctor
 import Data.Void
-import System.Random (randomIO)
+import System.Random (randomRIO)
+import Control.Monad.Trans.Free
+import Control.Monad.Trans.Class
 
 --
 
-data Channel m i o
-  = Output o (m (Channel m i o))
-  | Input (i -> m (Channel m i o))
-  | Action (m (Channel m i o))
-  | Stop
+data ChannelF i o next
+  = Output o next
+  | Input (i -> next)
+  deriving (Functor)
 
-instance (Functor m) => Functor (Channel m i) where
-  fmap :: (o -> o') -> Channel m i o -> Channel m i o'
-  fmap = rmap
+type ChannelT i o m a = FreeT (ChannelF i o) m a
 
-instance (Functor m) => Profunctor (Channel m) where
-  lmap :: (i' -> i) -> Channel m i o -> Channel m i' o
-  lmap f (Output o next) = Output o $ lmap f <$> next
-  lmap f (Input next) = Input (\i' -> lmap f <$> next (f i'))
-  lmap f (Action next) = Action $ lmap f <$> next
-  lmap _ Stop = Stop
+output :: Monad m => o -> ChannelT i o m ()
+output o = liftF (Output o ())
 
-  rmap :: (o -> o') -> Channel m i o -> Channel m i o'
-  rmap f (Output o next) = Output (f o) $ rmap f <$> next
-  rmap f (Input next) = Input (\i -> rmap f <$> next i)
-  rmap f (Action next) = Action $ rmap f <$> next
-  rmap _ Stop = Stop
+input :: Monad m => ChannelT i o m i
+input = liftF (Input id)
 
-instance (Monad m) => Applicative (Channel m i) where
-  pure :: o -> Channel m i o
-  pure o = Output o $ return (pure o)
+{-
+newtype ChannelP m a i o = ChannelP (ChannelT i o m a)
 
-  (<*>) :: Channel m i (o -> o') -> Channel m i o -> Channel m i o'
-  (Output f left) <*> (Output o right) = Output (f o) (liftA2 (<*>) left right)
-  (Action left) <*> (Action right) = Action (liftA2 (<*>) left right)
-  (Action left) <*> right = Action (liftA2 (<*>) left (pure right))
-  left <*> (Action right) = Action (liftA2 (<*>) (pure left) right)
-  (Input lNext) <*> (Input rNext) = Input (\i -> liftA2 (<*>) (lNext i) (rNext i))
-  (Input lNext) <*> right = Input (\i -> liftA2 (<*>) (lNext i) (pure right))
-  left <*> (Input rNext) = Input (\i -> liftA2 (<*>) (pure left) (rNext i))
-  Stop <*> Stop = Stop
-  Stop <*> (Output _ _) = Stop
-  (Output _ _) <*> Stop = Stop
-
-instance (Monad m) => Monad (Channel m i) where
-  return :: o -> Channel m i o
-  return = pure
-
-  (>>=) :: Channel m i o -> (o -> Channel m i o') -> Channel m i o'
-  (Output o lNext) >>= f = cont (f o)
-    where
-      cont (Output o' rNext) = Output o' (cont <$> rNext)
-      cont (Input rNext) = Input (\i -> cont <$> rNext i)
-      cont (Action rNext) = Action (cont <$> rNext)
-      cont Stop = Action (fmap (>>= f) lNext)
-  (Input next) >>= f = Input (\i -> fmap (>>= f) (next i))
-  (Action next) >>= f = Action (fmap (>>= f) next)
-  Stop >>= _ = Stop
+instance Profunctor (ChannelP m a) where
+  dimap fi fo (ChannelP c) = ChannelP (hoistFreeT (dimapChannelF fi fo) c)
+  where
+    dimapChannelF :: (i' -> i) -> (o -> o') -> ChannelF i o next -> ChannelF i' o' next
+    dimapChannelF _ fo (Output o next) = Output (fo o) next
+    dimapChannelF fi _ (Input next) = Input (next . fi)
+-}
 
 --
+
+fibProducer :: ChannelT Void Int IO ()
+fibProducer = go 0 1
+  where
+    go a b = do
+      output a
+      lift $ threadDelay 1000000
+      go b (a + b)
+
+randomProducer :: ChannelT Void Int IO ()
+randomProducer = forever $ do
+  n <- lift $ randomRIO (0, 999)
+  output n
+  lift $ threadDelay 1000000
+
+transform :: Monad m => (a -> b) -> ChannelT a b m ()
+transform f = forever $ do
+  a <- input
+  output (f a)
+
+matching :: Monad m => (a -> Bool) -> ChannelT a a m ()
+matching predicate = forever $ do
+  a <- input
+  when (predicate a) (output a)
+
+printer :: (Show s) => ChannelT s Void IO ()
+printer = forever $ do
+  s <- input
+  lift $ print s
+
+--
+
+{-
 
 data Graph m i o
   = Embed (Channel m i o)
   | forall x. Sequential (Graph m i x) (Graph m x o)
   | Parallel (Graph m i o) (Graph m i o)
+
+-- type Program m = Graph m Void Void
 
 instance (Functor m) => Functor (Graph m i) where
   fmap :: (o -> o') -> Graph m i o -> Graph m i o'
@@ -106,17 +113,12 @@ instance (Monad m) => Category (Graph m) where
   (.) = flip Sequential
 
 {-
+class MonadTrans t where
+  lift :: Monad m => m a -> t m a
+
+class Monad m => MonadIO m where
+  liftIO :: IO a -> m a
 -}
-
---
-
-type Producer m o = Channel m Void o
-
-type Consumer m i = Channel m i Void
-
-type Final m = Channel m Void Void
-
-type Program m = Graph m Void Void
 
 --
 
@@ -233,25 +235,9 @@ parallel left (Action rAction) = do
 
 --
 
-fibProducer :: Producer IO Int
-fibProducer = go fibs
-  where
-    go [] = error "This should not happen" -- because there are infinite Fibonacci numbers
-    go (n : rest) = Output n $ return $ Action $ threadDelay 1500000 $> go rest
-    fibs = 0 : 1 : zipWith (+) fibs (drop 1 fibs)
-
-randomProducer :: Producer IO Int
-randomProducer = Action $ threadDelay 1000000 >> randomIO <&> \n -> Output n (return randomProducer)
-
-double :: (Monad m) => Channel m Int Int
-double = Input (\i -> return $ Output (2 * i) (return double))
-
-
-printer :: (Show s) => Consumer IO s
-printer = Input (\s -> return $ Action $ print s $> printer)
-
 program :: Program IO
 program = Sequential (Sequential (Embed fibProducer) (Embed double)) (Embed printer)
 
 main :: IO ()
 main = runFinal =<< flatten program
+-}
