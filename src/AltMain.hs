@@ -106,6 +106,8 @@ c -> ((a -> c -> c), (b -> c -> c))
 sum, product (and pipe?) are (Free) Applicatives !
 
 
+(a, b) -> Signal (Either a b) -> Signal (a, b)
+
 
 
 -- Example program: independent tasks combined applicatively

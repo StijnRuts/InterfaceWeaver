@@ -122,6 +122,9 @@ instance (Monad m) => Filterable (Channel m a i) where
 
 (>>|) :: Filterable f => f a -> (a -> Maybe b) -> f b
 (>>|) = flip mapMaybe
+
+https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Choice.html
+https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Strong.html
 -}
 
 {-
