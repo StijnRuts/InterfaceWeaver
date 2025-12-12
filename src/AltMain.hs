@@ -105,10 +105,7 @@ c -> ((a -> c -> c), (b -> c -> c))
 
 sum, product (and pipe?) are (Free) Applicatives !
 
-
 (a, b) -> Signal (Either a b) -> Signal (a, b)
-
-
 
 -- Example program: independent tasks combined applicatively
 program :: FreeAp Task (String, Int)
@@ -134,9 +131,6 @@ main = do
   result <- runParallel program
   print result
 
-
-
-
 If you want parallelism inside Polysemy, you can:
 - Define an effect like Parallel :: [Sem r a] -> Sem r [a].
 - Write an interpreter that uses async or mapConcurrently to run those sub-computations.
@@ -161,10 +155,6 @@ runTaskParallel (Compute n) = embed $ pure (n * n)
 - Polysemy defines the effect system (Task).
 - Free Applicative structures the program so tasks can be parallelized.
 - The interpreter (runTaskParallel) decides how to execute them.
-
-
-
-
 
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}

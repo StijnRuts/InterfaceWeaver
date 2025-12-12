@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+{-
 import Control.Category (Category, (>>>))
 import qualified Control.Category as C
 import Control.Concurrent (threadDelay)
@@ -12,9 +13,14 @@ import Data.Profunctor
 import Data.Void
 import System.Random (randomRIO)
 import Witherable
+-}
+
+main :: IO ()
+main = putStrLn "Hello World"
 
 -- Type definitions
 
+{-
 data ChannelF i o next
   = Input (i -> next)
   | Output o next
@@ -110,6 +116,7 @@ instance (Monad m) => Filterable (Channel m a i) where
       go (OutputF o next) = case p o of
         Just o' -> output' o' $ runChanT go next
         Nothing -> runChanT go next
+-}
 
 {-
 -- https://hackage.haskell.org/package/base-4.21.0.0/docs/Control-Arrow.html
@@ -164,7 +171,7 @@ monoidMerge = productMerge mempty mempty
 -}
 
 -- Runners
-
+{-
 runChannel :: (Monad m) => m i -> (o -> m ()) -> Channel m a i o -> m a
 runChannel get put (Channel chan) = iterT go chan
   where
@@ -212,3 +219,4 @@ runner = Channel $ forever $ lift =<< input
 
 main :: IO ()
 main = runProgram $ fibProducer >>> printer
+-}
