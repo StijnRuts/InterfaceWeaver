@@ -6,12 +6,14 @@ module Weaver.Channel where
 import Control.Arrow
 import Control.Category (Category)
 import qualified Control.Category as C
+import Control.Monad (forever)
+import Data.Char
 import Data.Profunctor
 import Witherable
 
 data Channel eff i o where
   Pure :: (i -> o) -> Channel eff i o
-  Eff :: eff i o -> Channel eff i o
+  Eff :: (i -> eff o) -> Channel eff i o
   -- Input :: Channel eff i ()
   -- Output :: o -> Channel eff () o
   Seq :: Channel eff i x -> Channel eff x o -> Channel eff i o
@@ -21,6 +23,14 @@ data Channel eff i o where
   Zero :: Channel eff i o
   App :: Channel eff (Channel eff i o, i) o
   Loop :: Channel eff (i, s) (o, s) -> Channel eff i o
+
+type Producer eff o = Channel eff () o
+
+type Consumer eff i = Channel eff i () -- Void
+
+type Program eff = Channel eff () () -- Void
+
+type Source eff i = Consumer eff i -> Program eff
 
 instance Category (Channel eff) where
   id :: Channel eff a a
@@ -116,48 +126,54 @@ instance Filterable (Channel eff i) where
 (^|<) :: (Filterable f) => (a -> Maybe b) -> f a -> f b
 (^|<) = mapMaybe
 
+--
 
-runChannel :: (forall a b. eff a b -> a -> IO b) -> Channel eff i o -> (i -> IO o)
-runChannel runEff chan =
-  case chan of
-    (Pure f) -> pure . f
-    (Eff e) -> runEff e
-    (Seq l r) -> \i -> do
-      x <- runChannel runEff l i
-      o <- runChannel runEff r x
-      pure o {- HLint ignore "Redundant pure" -}
-    (Par l r) -> \(i1, i2) -> do
-      o1 <- runChannel runEff l i1
-      o2 <- runChannel runEff r i2
-      pure (o1, o2)
-    (Choice l r) -> error "Not yet implemented" -- Choice :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (Either i1 i2) (Either o1 o2)
-    (Plus l r) -> error "Not yet implemented" -- Plus :: Channel eff i o -> Channel eff i o -> Channel eff i o
-    Zero -> error "Not yet implemented" -- Zero :: Channel eff i o
-    App -> error "Not yet implemented" -- App :: Channel eff (Channel eff i o, i) o
-    (Loop c) -> error "Not yet implemented" -- Loop :: Channel eff (i, s) (o, s) -> Channel eff i o
+runChannel :: Channel IO i o -> (i -> IO o)
+runChannel (Pure f) = pure . f
+runChannel (Eff e) = e
+runChannel (Seq l r) = \i -> do
+  x <- runChannel l i
+  o <- runChannel r x
+  pure o {- HLint ignore "Redundant pure" -}
+runChannel (Par l r) = \(i1, i2) -> do
+  o1 <- runChannel l i1
+  o2 <- runChannel r i2
+  pure (o1, o2)
+runChannel (Choice l r) = error "Not yet implemented"
+-- Choice :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (Either i1 i2) (Either o1 o2)
+runChannel (Plus l r) = error "Not yet implemented"
+-- Plus :: Channel eff i o -> Channel eff i o -> Channel eff i o
+runChannel Zero = error "Not yet implemented"
+-- Zero :: Channel eff i o
+runChannel App = error "Not yet implemented"
+-- App :: Channel eff (Channel eff i o, i) o
+runChannel (Loop c) = error "Not yet implemented"
+
+-- Loop :: Channel eff (i, s) (o, s) -> Channel eff i o
+
+runProgram :: Program IO -> IO ()
+runProgram p = runChannel p ()
 
 --
 
-data MyEff i o where
-  ReadLine :: MyEff () String
-  WriteLine :: MyEff String ()
+source :: Source IO String -- Channel eff String () -> Channel eff () ()
+source chan = Eff $ \() -> forever $ getLine >>= runChannel chan
 
-readLine :: Channel MyEff () String
-readLine = Eff ReadLine
+producer :: Producer IO String -- Channel IO () String
+producer = Eff $ \() -> getLine
 
-writeLine :: String -> Channel MyEff () ()
-writeLine s = pure s >>> Eff WriteLine
+transformer :: Channel eff String String
+transformer = arr $ fmap toUpper
 
-runMyEff :: MyEff i o -> i -> IO o
-runMyEff ReadLine () = getLine
-runMyEff WriteLine s = putStrLn s
+consumer :: Consumer IO String -- Channel IO String ()
+consumer = Eff putStrLn
 
-program :: Channel MyEff () ()
-program = do
-  writeLine "Enter your name:"
-  name <- readLine
-  writeLine $ "Hello, " ++ name ++ "!"
+
+-- program :: Program IO -- Channel IO () ()
+-- program = producer >>> transformer >>> consumer
+
+program :: Program IO -- Channel IO () ()
+program = source $ transformer >>> consumer
 
 main :: IO ()
-main = runChannel runMyEff program ()
-
+main = runProgram program
