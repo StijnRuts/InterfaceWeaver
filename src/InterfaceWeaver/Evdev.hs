@@ -12,7 +12,9 @@ import InterfaceWeaver.App
 import System.IO (hPutStrLn, stderr)
 import System.Posix.IO.ByteString (OpenMode (..), defaultFileFlags, nonBlock, openFd)
 
-deviceSource :: String -> Bool -> App (Events Evdev.EventData)
+data GrabDevice = Grab | DontGrab
+
+deviceSource :: String -> GrabDevice -> App (Events Evdev.EventData)
 deviceSource path grab = do
   fd <- liftIO $ openFd (BS.pack path) ReadOnly defaultFileFlags {nonBlock = True}
   eitherDevice <- liftIO $ try $ Evdev.newDeviceFromFd fd
@@ -21,7 +23,7 @@ deviceSource path grab = do
       liftIO $ hPutStrLn stderr $ "Could not read device " <> path
       return mempty
     Right device -> do
-      when grab $ liftIO $ Evdev.grabDevice device
+      when (grab == Grab) $ liftIO $ Evdev.grabDevice device
       (events, push) <- liftIO Events.source
       onLoop $ do
         maybeEvent <- Evdev.nextEventMay device

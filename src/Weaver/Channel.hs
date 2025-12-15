@@ -11,10 +11,31 @@ import Data.Char
 import Data.Profunctor
 import Witherable
 
+example :: Kleisli IO () ()
+example = proc () -> do
+  x <- inputA -< ()
+  outputA -< 2 * x
+  y <- inputA -< ()
+  z <- inputA -< ()
+  outputA -< y + z
+
+inputA :: Kleisli IO () Int
+inputA = Kleisli $ \() -> do
+  putStr "Enter a number: "
+  readLn
+
+outputA :: Kleisli IO Int ()
+outputA = Kleisli $ \n -> do
+  putStrLn $ "Output: " ++ show n
+
+main :: IO ()
+main = runKleisli example ()
+
 data Channel eff i o where
   Pure :: (i -> o) -> Channel eff i o
   Eff :: (i -> eff o) -> Channel eff i o
-  -- Input :: Channel eff i ()
+  -- EffChan :: eff (Channel eff i o)
+  -- Input :: Channel eff i () -> (i -> Channel eff () ())
   -- Output :: o -> Channel eff () o
   Seq :: Channel eff i x -> Channel eff x o -> Channel eff i o
   Par :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (i1, i2) (o1, o2)
@@ -131,6 +152,7 @@ instance Filterable (Channel eff i) where
 runChannel :: Channel IO i o -> (i -> IO o)
 runChannel (Pure f) = pure . f
 runChannel (Eff e) = e
+-- runChannel (EffChan eChan) = eChan >>= runChannel
 runChannel (Seq l r) = \i -> do
   x <- runChannel l i
   o <- runChannel r x
@@ -154,26 +176,42 @@ runChannel (Loop c) = error "Not yet implemented"
 runProgram :: Program IO -> IO ()
 runProgram p = runChannel p ()
 
+runProgramForever :: Program IO -> IO ()
+runProgramForever = forever . runProgram
+
 --
 
-source :: Source IO String -- Channel eff String () -> Channel eff () ()
-source chan = Eff $ \() -> forever $ getLine >>= runChannel chan
-
-producer :: Producer IO String -- Channel IO () String
+producer :: Producer IO String
 producer = Eff $ \() -> getLine
 
 transformer :: Channel eff String String
 transformer = arr $ fmap toUpper
 
-consumer :: Consumer IO String -- Channel IO String ()
+consumer :: Consumer IO String
 consumer = Eff putStrLn
 
+{-
+aProducer :: Channel IO () String
+aProducer = forever $ do
+  eff $ threadDelay 1000000
+  output "A"
 
--- program :: Program IO -- Channel IO () ()
--- program = producer >>> transformer >>> consumer
+bProducer :: Channel IO () String
+bProducer = forever $ do
+  eff $ threadDelay 2000000
+  output "B"
+
+cProducer :: Channel IO () String
+cProducer = forever $ do
+  eff $ threadDelay 3000000
+  output "C"
+-}
 
 program :: Program IO -- Channel IO () ()
-program = source $ transformer >>> consumer
+program = producer >>> transformer >>> consumer
 
-main :: IO ()
-main = runProgram program
+-- program :: Program IO -- Channel IO () ()
+-- program = source $ transformer >>> consumer
+
+-- main :: IO ()
+-- main = runProgram program

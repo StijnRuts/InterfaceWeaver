@@ -4,6 +4,7 @@
     enable = true;
     package = pkgs.haskell.packages.ghc9103.ghcWithPackages (ps: with ps; [
       aeson
+      data-default
       evdev
       free
       hspec

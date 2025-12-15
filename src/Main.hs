@@ -2,7 +2,6 @@
 
 module Main (main) where
 
-{-
 import Control.Category (Category, (>>>))
 import qualified Control.Category as C
 import Control.Concurrent (threadDelay)
@@ -13,14 +12,9 @@ import Data.Profunctor
 import Data.Void
 import System.Random (randomRIO)
 import Witherable
--}
-
-main :: IO ()
-main = putStrLn "Hello World"
 
 -- Type definitions
 
-{-
 data ChannelF i o next
   = Input (i -> next)
   | Output o next
@@ -116,25 +110,21 @@ instance (Monad m) => Filterable (Channel m a i) where
       go (OutputF o next) = case p o of
         Just o' -> output' o' $ runChanT go next
         Nothing -> runChanT go next
--}
 
-{-
 -- https://hackage.haskell.org/package/base-4.21.0.0/docs/Control-Arrow.html
 
-(^>>) :: Arrow a => (b -> c) -> a c d -> a b d
-(>>^) :: Arrow a => a b c -> (c -> d) -> a b d
+-- (^>>) :: Arrow a => (b -> c) -> a c d -> a b d
+-- (>>^) :: Arrow a => a b c -> (c -> d) -> a b d
 
-(>|>) :: Filterable f => f a -> (a -> Bool) -> f a
-(>|>) = flip filter
+(>|>) :: (Filterable f) => f a -> (a -> Bool) -> f a
+(>|>) = flip Witherable.filter
 
-(>>|) :: Filterable f => f a -> (a -> Maybe b) -> f b
+(>>|) :: (Filterable f) => f a -> (a -> Maybe b) -> f b
 (>>|) = flip mapMaybe
 
-https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Choice.html
-https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Strong.html
--}
+-- https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Choice.html
+-- https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Strong.html
 
-{-
 data Merge s a b o = Merge
   { initialState :: s,
     getState :: o -> s,
@@ -168,10 +158,8 @@ productMerge initA initB =
 
 monoidMerge :: (Monoid a, Monoid b) => Merge (a, b) a b (a, b)
 monoidMerge = productMerge mempty mempty
--}
 
 -- Runners
-{-
 runChannel :: (Monad m) => m i -> (o -> m ()) -> Channel m a i o -> m a
 runChannel get put (Channel chan) = iterT go chan
   where
@@ -219,4 +207,3 @@ runner = Channel $ forever $ lift =<< input
 
 main :: IO ()
 main = runProgram $ fibProducer >>> printer
--}
