@@ -1,217 +1,170 @@
-{-# LANGUAGE Arrows #-}
-{-# LANGUAGE GADTs #-}
-
 module Weaver.Channel where
 
-import Control.Arrow
-import Control.Category (Category)
-import qualified Control.Category as C
-import Control.Monad (forever)
-import Data.Char
-import Data.Profunctor
-import Witherable
-
-example :: Kleisli IO () ()
-example = proc () -> do
-  x <- inputA -< ()
-  outputA -< 2 * x
-  y <- inputA -< ()
-  z <- inputA -< ()
-  outputA -< y + z
-
-inputA :: Kleisli IO () Int
-inputA = Kleisli $ \() -> do
-  putStr "Enter a number: "
-  readLn
-
-outputA :: Kleisli IO Int ()
-outputA = Kleisli $ \n -> do
-  putStrLn $ "Output: " ++ show n
-
-main :: IO ()
-main = runKleisli example ()
-
-data Channel eff i o where
-  Pure :: (i -> o) -> Channel eff i o
-  Eff :: (i -> eff o) -> Channel eff i o
-  -- EffChan :: eff (Channel eff i o)
-  -- Input :: Channel eff i () -> (i -> Channel eff () ())
-  -- Output :: o -> Channel eff () o
-  Seq :: Channel eff i x -> Channel eff x o -> Channel eff i o
-  Par :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (i1, i2) (o1, o2)
-  Choice :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (Either i1 i2) (Either o1 o2)
-  Plus :: Channel eff i o -> Channel eff i o -> Channel eff i o
-  Zero :: Channel eff i o
-  App :: Channel eff (Channel eff i o, i) o
-  Loop :: Channel eff (i, s) (o, s) -> Channel eff i o
-
-type Producer eff o = Channel eff () o
-
-type Consumer eff i = Channel eff i () -- Void
-
-type Program eff = Channel eff () () -- Void
-
-type Source eff i = Consumer eff i -> Program eff
-
-instance Category (Channel eff) where
-  id :: Channel eff a a
-  id = Pure id
-
-  (.) :: Channel eff x o -> Channel eff i x -> Channel eff i o
-  (.) = flip Seq
-
-instance Arrow (Channel eff) where
-  arr :: (i -> o) -> Channel eff i o
-  arr = Pure
-
-  (***) :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (i1, i2) (o1, o2)
-  (***) = Par
-
-instance ArrowChoice (Channel eff) where
-  (+++) :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (Either i1 i2) (Either o1 o2)
-  (+++) = Choice
-
-instance ArrowZero (Channel eff) where
-  zeroArrow :: Channel eff i o
-  zeroArrow = Zero
-
-instance ArrowPlus (Channel eff) where
-  (<+>) :: Channel eff i o -> Channel eff i o -> Channel eff i o
-  (<+>) = Plus
-
-instance ArrowApply (Channel eff) where
-  app :: Channel eff (Channel eff i o, i) o
-  app = App
-
-instance ArrowLoop (Channel eff) where
-  loop :: Channel eff (i, s) (o, s) -> Channel eff i o
-  loop = Loop
-
-instance Profunctor (Channel eff) where
-  lmap :: (i' -> i) -> Channel eff i o -> Channel eff i' o
-  lmap = (^>>)
-
-  rmap :: (o -> o') -> Channel eff i o -> Channel eff i o'
-  rmap = flip (>>^)
-
-instance Functor (Channel eff i) where
-  fmap :: (o -> o') -> Channel eff i o -> Channel eff i o'
-  fmap = rmap
-
-instance Applicative (Channel eff i) where
-  pure :: o -> Channel eff i o
-  pure = Pure . const
-
-  (<*>) :: Channel eff i (o -> o') -> Channel eff i o -> Channel eff i o'
-  fChan <*> oChan = proc i -> do
-    f <- fChan -< i
-    o <- oChan -< i
-    returnA -< f o
-
-instance (Semigroup o) => Semigroup (Channel eff i o) where
-  (<>) :: Channel eff i o -> Channel eff i o -> Channel eff i o
-  lArr <> rArr = (<>) <$> lArr <*> rArr
-
-instance (Monoid o) => Monoid (Channel eff i o) where
-  mempty :: Channel eff i o
-  mempty = pure mempty
-
-instance Monad (Channel eff i) where
-  (>>=) :: Channel eff i o -> (o -> Channel eff i o') -> Channel eff i o'
-  chan >>= f = (chan >>^ f) &&& C.id >>> app
+import Data.Bifunctor
+import Data.Functor ((<&>))
+import Data.Functor.Contravariant
 
 {-
-  chan >>= f = proc i -> do
-    o <- chan -< i
-    o' <- f o -< i -- Variable not in scope: o   ಠ_ಠ
-    returnA -< o'
--}
 
-instance Filterable (Channel eff i) where
-  mapMaybe :: (o -> Maybe o') -> Channel eff i o -> Channel eff i o'
-  mapMaybe f chan = proc i -> do
-    o <- chan -< i
-    case f o of
-      Just o' -> returnA -< o'
-      Nothing -> zeroArrow -< ()
+data Channel m r i o = Channel (Input m r i) (Output m r o)
+-- type Program m r = Channel m r Void Void
 
-(>||) :: (Filterable f) => f a -> (a -> Bool) -> f a
-(>||) = flip Witherable.filter
+# runChannel (m i) -> (o -> m ()) -> Channel i o -> m ()
 
-(>|^) :: (Filterable f) => f a -> (a -> Maybe b) -> f b
-(>|^) = flip mapMaybe
+ISOMORPHISMs
+Producer (Either Void o) <-> Producer o
+Consumer (Either Void i) <-> Consumer i
 
-(||<) :: (Filterable f) => (a -> Bool) -> f a -> f a
-(||<) = Witherable.filter
+Channel i o <-> (Consumer i, Producer o)
 
-(^|<) :: (Filterable f) => (a -> Maybe b) -> f a -> f b
-(^|<) = mapMaybe
+Channel Void o <-> Producer o
+Channel i Void <-> Consumer i
+Channel Void Void <-> Program
+
+Channel (Either i Void) o <-> Channel i o
+Channel i (Either o Void) <-> Channel i o
+Channel (Either i Void) (Either o Void) <-> Channel i o
+
+-- Channel i o
+
+Semigroup
+Monoid
+Category
+Functor
+Profunctor
+Profunctor Arrows
+Arrows
+Coroutine / Cont ??
+Monad ?
+
+zero :: a/b
+id   :: a/a
+
+loop :: a&s/b&s -> a/b
+      = a/b + State s -> a/b
+      = m (a/b) -> a/b
+
+(>>>) :: a/x -> x/b   ->    a/b
+
+(<+>) :: a/b -> a/b   ->    a/b
+(+++) :: a/b -> a'/b' -> a|a'/b|b'
+(|||) :: a/b -> a'/b  -> a|a'/b
+
+-- | = Either, & = Tuple, * = These
+(-+-) :: a/b -> a/b   ->    a/b
+(-+|) :: a/b -> a/b'  ->    a/b|b'
+(|+-) :: a/b -> a'/b  -> a|a'/b
+(|+|) :: a/b -> a'/b' -> a|a'/b|b'
+(&+-) :: a/b -> a'/b  -> a&a'/b
+(&+|) :: a/b -> a'/b' -> a&a'/b|b'
+(*+-) :: a/b -> a'/b  -> a*a'/b
+(*+|) :: a/b -> a'/b' -> a*a'/b|b'
+
+---------------------
+EMPTY :: a/b -- eat all input, never produce output
+---------------------
+NEW :: a/a -- pass all input to output
+-- NEW :: a/b
+--   a -> mb -- in to out == a/a + MAP
+---------------------
+MAP a/b -> e/f
+  e -> ma -- in to in
+  b -> mf -- out to out
+---------------------
+--SEQ a/x -> x/b -> a/b
+SEQ a/b -> c/d -> e/f
+  -- e -> ma
+  b -> mc  -- out to in
+  -- d -> mf
+---------------------
+PAR a/b -> c/d -> e/f
+  e -> These ma mc -- in to ins
+  Either b d -> mf -- outs to out
+---------------------
+LOOP a/b -> e/f
+  mb -- initial
+  -- e -> ma -- in to in
+  (e,b) -> ma -- feedback
+  -- b -> mf -- out to out
+---------------------
+CROSS a/b -> c/d -> e/f
+  m (Either b d) -- initial
+  -- e -> These ma mc -- in to ins
+  (e,Either b d) -> These ma mc -- feedback
+  -- Either b d -> mf -- outs to out
+
+== merge (= PAR id id)  a/b with c/d = These a c / Either b d
+   then use LOOP
+---------------------
+
+Goal: ti|i→to|o => i→o
+Given by Timer: ∅→ti + to→∅ == ∅|to→ti|∅ == to→ti
+
+∅→ti PAR i→i = ∅|i→ti|i = i→ti|i
+to→∅ PAR o→o = to|o→∅|o = to|o→o
+
+i→ti|i SEQ ti|i→to|o SEQ to|o→o = i→o
+\^^^^^^^    ^^^^^^^^^     ^^^^^^^  ^^^^
+ Timer       Input        Timer  Output
+
+# Coroutines !!!
+https://www.notion.so/Coroutines-2d247bfaede9802486c3df35d65e0bf5
+https://hackage.haskell.org/package/Coroutine-0.1.0.0/docs/Control-Coroutine.html
 
 --
 
-runChannel :: Channel IO i o -> (i -> IO o)
-runChannel (Pure f) = pure . f
-runChannel (Eff e) = e
--- runChannel (EffChan eChan) = eChan >>= runChannel
-runChannel (Seq l r) = \i -> do
-  x <- runChannel l i
-  o <- runChannel r x
-  pure o {- HLint ignore "Redundant pure" -}
-runChannel (Par l r) = \(i1, i2) -> do
-  o1 <- runChannel l i1
-  o2 <- runChannel r i2
-  pure (o1, o2)
-runChannel (Choice l r) = error "Not yet implemented"
--- Choice :: Channel eff i1 o1 -> Channel eff i2 o2 -> Channel eff (Either i1 i2) (Either o1 o2)
-runChannel (Plus l r) = error "Not yet implemented"
--- Plus :: Channel eff i o -> Channel eff i o -> Channel eff i o
-runChannel Zero = error "Not yet implemented"
--- Zero :: Channel eff i o
-runChannel App = error "Not yet implemented"
--- App :: Channel eff (Channel eff i o, i) o
-runChannel (Loop c) = error "Not yet implemented"
-
--- Loop :: Channel eff (i, s) (o, s) -> Channel eff i o
-
-runProgram :: Program IO -> IO ()
-runProgram p = runChannel p ()
-
-runProgramForever :: Program IO -> IO ()
-runProgramForever = forever . runProgram
+data Coroutine y r
+  = Done r
+  | Yield y (Coroutine y r)
 
 --
 
-producer :: Producer IO String
-producer = Eff $ \() -> getLine
+data Step y r
+  = Done r
+  | Yield y (Cont (Step y r) r)
 
-transformer :: Channel eff String String
-transformer = arr $ fmap toUpper
+--
 
-consumer :: Consumer IO String
-consumer = Eff putStrLn
+data CoF o i k
+  = Yield o k
+  | Await (i -> k)
+  deriving Functor
 
-{-
-aProducer :: Channel IO () String
-aProducer = forever $ do
-  eff $ threadDelay 1000000
-  output "A"
+type Coroutine o i = Free (CoF o i)
 
-bProducer :: Channel IO () String
-bProducer = forever $ do
-  eff $ threadDelay 2000000
-  output "B"
+--
 
-cProducer :: Channel IO () String
-cProducer = forever $ do
-  eff $ threadDelay 3000000
-  output "C"
+data YieldF o k
+  = Yield o k
+  deriving Functor
+
+data AwaitF i k
+  = Await (i -> k)
+  deriving Functor
+
+data (f :+: g) x
+  = InL (f x)
+  | InR (g x)
+  deriving Functor
+
+type Coroutine o i = Free (YieldF o :+: AwaitF i)
+type CoroutineT o i m = FreeT (YieldF o :+: AwaitF i) m
+
+------------
+
+Control.Monad.Cont
+cont :: ((a -> r) -> r) -> Cont r a
+runCont :: Cont r a -> (a -> r)	-> r
+
+--
+
+data Free f a
+  Pure a
+  Free (f (Free f a))
+
+newtype FreeT f m a
+  runFreeT :: m (FreeF f a (FreeT f m a))
+iterT :: (f (m a) -> m a) -> FreeT f m a -> m a
+runFreeT :: FreeT f m a -> m (FreeF f a (FreeT f m a))
+
 -}
-
-program :: Program IO -- Channel IO () ()
-program = producer >>> transformer >>> consumer
-
--- program :: Program IO -- Channel IO () ()
--- program = source $ transformer >>> consumer
-
--- main :: IO ()
--- main = runProgram program

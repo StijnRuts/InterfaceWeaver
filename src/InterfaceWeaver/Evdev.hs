@@ -18,6 +18,7 @@ deviceSource :: String -> GrabDevice -> App (Events Evdev.EventData)
 deviceSource path grab = do
   fd <- liftIO $ openFd (BS.pack path) ReadOnly defaultFileFlags {nonBlock = True}
   eitherDevice <- liftIO $ try $ Evdev.newDeviceFromFd fd
+  -- eitherDevice <- liftIO $ try $ Evdev.newDevice $ BS.pack path
   case eitherDevice of
     Left (_ :: SomeException) -> do
       liftIO $ hPutStrLn stderr $ "Could not read device " <> path

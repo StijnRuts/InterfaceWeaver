@@ -2,6 +2,10 @@
 
 module Main (main) where
 
+main :: IO ()
+main = putStrLn "Hello world"
+
+{-
 import Control.Category (Category, (>>>))
 import qualified Control.Category as C
 import Control.Concurrent (threadDelay)
@@ -207,3 +211,4 @@ runner = Channel $ forever $ lift =<< input
 
 main :: IO ()
 main = runProgram $ fibProducer >>> printer
+-}
