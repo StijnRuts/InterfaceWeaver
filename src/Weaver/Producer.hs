@@ -3,14 +3,7 @@ module Weaver.Producer where
 import Data.Bifunctor
 import Data.Functor ((<&>))
 
-{-
-data FlipFreeT m a f
-  = Pure a
-  | Lift (m (FlipFreeT m a f))
-  | Free (f (FlipFreeT m a f))
--}
-
--- TODO unify with Consumer into a FreeT like type
+-- TODO Rewrite to FreeT
 data Producer m a o
   = Pure a
   | Lift (m (Producer m a o))

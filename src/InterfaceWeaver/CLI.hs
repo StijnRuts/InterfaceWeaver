@@ -4,6 +4,7 @@ module InterfaceWeaver.CLI (cli) where
 {- HLint ignore "Monad law, left identity" -}
 {- HLint ignore "Monad law, right identity" -}
 
+{-
 import Control.Category ((>>>))
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
@@ -164,3 +165,4 @@ showEventType Codes.EvRep = "Repeat"
 showEventType Codes.EvFf = "Force Feedback"
 showEventType Codes.EvFfStatus = "Force Feedback Status"
 showEventType Codes.EvPwr = "Power"
+-}

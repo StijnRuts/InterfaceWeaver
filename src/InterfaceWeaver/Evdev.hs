@@ -1,5 +1,6 @@
-module InterfaceWeaver.Evdev (deviceSource, deviceSink) where
+module InterfaceWeaver.Evdev {-(deviceSource, deviceSink)-} where
 
+{-
 import Control.Exception (SomeException, try)
 import Control.Monad (when)
 import qualified Data.ByteString.Char8 as BS
@@ -588,3 +589,4 @@ allKeys =
     Codes.BtnTriggerHappy39,
     Codes.BtnTriggerHappy40
   ]
+-}

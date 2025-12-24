@@ -1,11 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module OldMain (main) where
+module Main (main) where
 
 {- HLint ignore "Redundant <&>" -}
 {- HLint ignore "Functor law" -}
 
+{-
 import Data.Events
 import Data.Functor ((<&>))
 import qualified Evdev
@@ -73,3 +74,7 @@ swapAZ kc = kc
 countA :: (Evdev.EventData, Int) -> (Evdev.EventData, Int)
 countA (event@(Evdev.KeyEvent Codes.KeyA _), state) = (event, state + 1)
 countA (event, state) = (event, state)
+-}
+
+main :: IO ()
+main = putStrLn "Hello"

@@ -14,57 +14,6 @@ runChannel (m i) -> (o -> m ()) -> Channel i o -> m ()
 
 ISOMORPHISMs
 
-data Iso k a b
-  embed :: k a b
-  project :: k b a
-
--- Iso specialized to the function arrow
-type IsoF a b = Iso (->) a b
-
-swapIso :: IsoF (a, b) (b, a)
-swapIso = Iso
-  { embed   = \(x, y) -> (y, x)
-  , project = \(y, x) -> (x, y)
-  }
-
-swapIso :: Arrow k => Iso k (a, b) (b, a)
-swapIso = Iso
-  { embed   = arr (\(x, y) -> (y, x))
-  , project = arr (\(y, x) -> (x, y))
-  }
-
-swapIso :: Arrow k => Iso k (a, b) (b, a)
-swapIso = Iso
-  { embed   = arr snd &&& arr fst
-  , project = arr snd &&& arr fst
-  }
-
-class Convert a b where
-    convert :: a -> b
-
-instance Convert [a] (Either a a) where
-    convert []      = Left undefined
-    convert (x:_)   = Right x
-
-instance Convert (a, a) [a] where
-    convert (x, y) = [x, y]
-
-instance Convert (Those a a) (Either a a) where
-    convert (This x)      = Left x
-    convert (That y)      = Right y
-    convert (These x _)   = Left x
-
-foo :: Either Int Int
-foo = convert [1,2,3]
-
-bar :: [Int]
-bar = convert (1,2)
-
-main :: IO ()
-main = do
-  print $ embed swapIso (1, "hi")     -- ("hi",1)
-  print $ project swapIso ("hi", 1)   -- (1,"hi")
-
 Producer (Either Void o) <-> Producer o
 Producer (Either o Void) <-> Producer o
   Tuple, These ???

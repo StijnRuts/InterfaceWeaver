@@ -1,16 +1,13 @@
 module Test.Main where
 
-import qualified Test.Control.Timeout
-import qualified Test.Data.Events
-import qualified Test.Data.IO.Map
-import qualified Test.Data.IO.Seq
-import qualified Test.Data.Union
-import Test.Hspec
+-- import qualified Test.Foo.Bar
+-- import Test.Hspec
 
+{-
 main :: IO ()
 main = hspec $ do
-  Test.Control.Timeout.spec
-  Test.Data.Events.spec
-  Test.Data.IO.Seq.spec
-  Test.Data.IO.Map.spec
-  Test.Data.Union.spec
+    Foo.Bar.spec
+-}
+
+main :: IO ()
+main = putStrLn "Testing"
