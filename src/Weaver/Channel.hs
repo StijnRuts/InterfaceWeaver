@@ -5,25 +5,86 @@ import Data.Functor ((<&>))
 import Data.Functor.Contravariant
 
 {-
+-- TODO
 
 data Channel m r i o = Channel (Input m r i) (Output m r o)
 -- type Program m r = Channel m r Void Void
 
-# runChannel (m i) -> (o -> m ()) -> Channel i o -> m ()
+runChannel (m i) -> (o -> m ()) -> Channel i o -> m ()
 
 ISOMORPHISMs
+
+data Iso k a b
+  embed :: k a b
+  project :: k b a
+
+-- Iso specialized to the function arrow
+type IsoF a b = Iso (->) a b
+
+swapIso :: IsoF (a, b) (b, a)
+swapIso = Iso
+  { embed   = \(x, y) -> (y, x)
+  , project = \(y, x) -> (x, y)
+  }
+
+swapIso :: Arrow k => Iso k (a, b) (b, a)
+swapIso = Iso
+  { embed   = arr (\(x, y) -> (y, x))
+  , project = arr (\(y, x) -> (x, y))
+  }
+
+swapIso :: Arrow k => Iso k (a, b) (b, a)
+swapIso = Iso
+  { embed   = arr snd &&& arr fst
+  , project = arr snd &&& arr fst
+  }
+
+class Convert a b where
+    convert :: a -> b
+
+instance Convert [a] (Either a a) where
+    convert []      = Left undefined
+    convert (x:_)   = Right x
+
+instance Convert (a, a) [a] where
+    convert (x, y) = [x, y]
+
+instance Convert (Those a a) (Either a a) where
+    convert (This x)      = Left x
+    convert (That y)      = Right y
+    convert (These x _)   = Left x
+
+foo :: Either Int Int
+foo = convert [1,2,3]
+
+bar :: [Int]
+bar = convert (1,2)
+
+main :: IO ()
+main = do
+  print $ embed swapIso (1, "hi")     -- ("hi",1)
+  print $ project swapIso ("hi", 1)   -- (1,"hi")
+
 Producer (Either Void o) <-> Producer o
+Producer (Either o Void) <-> Producer o
+  Tuple, These ???
+
 Consumer (Either Void i) <-> Consumer i
+Consumer (Either i Void) <-> Consumer i
+  Tuple, These ???
 
 Channel i o <-> (Consumer i, Producer o)
 
 Channel Void o <-> Producer o
 Channel i Void <-> Consumer i
-Channel Void Void <-> Program
+
+type Program = Channel Void Void
+runProgram :: Program m () -> m ()
 
 Channel (Either i Void) o <-> Channel i o
 Channel i (Either o Void) <-> Channel i o
 Channel (Either i Void) (Either o Void) <-> Channel i o
+  Tuple, These ???
 
 -- Channel i o
 
@@ -107,7 +168,7 @@ i→ti|i SEQ ti|i→to|o SEQ to|o→o = i→o
 \^^^^^^^    ^^^^^^^^^     ^^^^^^^  ^^^^
  Timer       Input        Timer  Output
 
-# Coroutines !!!
+Coroutines !!!
 https://www.notion.so/Coroutines-2d247bfaede9802486c3df35d65e0bf5
 https://hackage.haskell.org/package/Coroutine-0.1.0.0/docs/Control-Coroutine.html
 

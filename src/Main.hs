@@ -1,214 +1,75 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE DataKinds #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Main (main) where
+module OldMain (main) where
 
-main :: IO ()
-main = putStrLn "Hello world"
+{- HLint ignore "Redundant <&>" -}
+{- HLint ignore "Functor law" -}
 
-{-
-import Control.Category (Category, (>>>))
-import qualified Control.Category as C
-import Control.Concurrent (threadDelay)
-import Control.Monad (forever)
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Free
-import Data.Profunctor
-import Data.Void
-import System.Random (randomRIO)
-import Witherable
+import Data.Events
+import Data.Functor ((<&>))
+import qualified Evdev
+import qualified Evdev.Codes as Codes
+import InterfaceWeaver.App
+import InterfaceWeaver.CLI
+import InterfaceWeaver.Evdev
+import InterfaceWeaver.Keyboard
+import Network.BSD (getHostName)
 
--- Type definitions
+keyboard :: String -> String
+keyboard "P520" = "/dev/input/by-id/usb-Dell_Dell_USB_Entry_Keyboard-event-kbd"
+keyboard "T420" = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+keyboard "X201" = "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+keyboard hostname = error $ "No keyboard defined for " <> hostname
 
-data ChannelF i o next
-  = Input (i -> next)
-  | Output o next
-  deriving (Functor)
+trackpad :: String -> String
+trackpad "P520" = "/dev/input/by-id/usb-Apple_Inc._Magic_Trackpad_2_CC2101201T7J2Y1AA-if01-event-mouse"
+trackpad "T420" = "/dev/input/by-path/platform-i8042-serio-1-event-mouse"
+trackpad "X201" = "/dev/input/by-path/platform-i8042-serio-1-event-mouse"
+trackpad hostname = error $ "No trackpad defined for " <> hostname
 
-type ChannelT i o m a = FreeT (ChannelF i o) m a
+mouse :: String -> String
+mouse "P520" = "/dev/input/by-id/usb-Logitech_USB_Laser_Mouse-event-mouse"
+mouse "X201" = "/dev/input/by-id/usb-Logitech_USB_Receiver-if02-event-mouse"
+mouse hostname = error $ "No mouse defined for " <> hostname
 
-newtype Channel m a i o = Channel (ChannelT i o m a)
+trackpoint :: String -> String
+trackpoint "T420" = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+trackpoint "X201" = "/dev/input/by-path/platform-i8042-serio-2-event-mouse"
+trackpoint hostname = error $ "No trackpoint defined for " <> hostname
 
-type Producer m a o = Channel m a Void o
+primaryMouse :: String -> String
+primaryMouse "P520" = mouse "P520"
+primaryMouse "T420" = trackpad "T420"
+primaryMouse "X201" = trackpad "X201"
+primaryMouse hostname = error $ "No primary mouse defined for " <> hostname
 
-type IOProducer o = Producer IO () o
-
-type Consumer m a i = Channel m a i Void
-
-type IOConsumer i = Consumer IO () i
-
-type Program m a = Channel m a Void Void
-
-type IOProgram = Program IO ()
-
-input :: (Monad m) => ChannelT i o m i
-input = liftF $ Input id
-
-output :: (Monad m) => o -> ChannelT i o m ()
-output o = liftF $ Output o ()
-
--- Internal synonyms for shorter code
-
-pattern InputF next = Free (Input next)
-
-pattern OutputF o next = Free (Output o next)
-
-input' = pure . Free . Input
-
-output' = pure . Free . Output
-
-pure' = pure . Pure
-
-onChan f (Channel chan) = Channel $ f chan
-
-onChan2 f (Channel chan1) (Channel chan2) = Channel $ f chan1 chan2
-
-runChanT run chanT = FreeT $ bind run (runFreeT chanT)
-
-runChanT2 run chanT1 chanT2 = FreeT $ liftA2 run (runFreeT chanT1) (runFreeT chanT2)
-
--- TODO concurency
-
--- Typeclass instances
-
-instance Semigroup (Channel m a i o) where
-  (<>) :: Channel m a i o -> Channel m a i o -> Channel m a i o
-  lChan <> rChan = onChan2 (runChanT2 parallel) lChan rChan
-    where
-      parallel (InputF f1) (InputF f2) = input' $ \i -> runChanT2 parallel (f1 i) (f2 i)
-      parallel (OutputF o1 next1) (OutputF o2 next2) = output' o1 $ output' o2 $ runChanT2 parallel next1 next2
-      parallel (OutputF o next) right = output' o $ runChanT2 parallel next right
-      parallel left (OutputF o next) = output' o $ runChanT2 parallel left next
-      parallel left (Pure _) = left
-      parallel (Pure _) right = right
-
-instance (Monad m) => Category (Channel m a) where
-  id :: Channel m a x x
-  id = Channel $ forever $ input >>= output
-  (.) :: Channel m a x o -> Channel m a i x -> Channel m a i o
-  oChan . iChan = onChan2 (runChanT2 sequential) iChan oChan
-    where
-      sequential (OutputF x next) (InputF f) = runChanT2 sequential next (f x)
-      sequential left (OutputF o next) = output' o $ runChanT2 sequential left next
-      sequential (InputF f) right = input' $ \i -> runChanT2 sequential (f i) right
-      sequential (Pure _) (Pure a) = pure' a
-      sequential (Pure a) (InputF _) = pure' a
-      sequential (OutputF _ _) (Pure a) = pure' a
-
-instance (Monad m) => Functor (Channel m a i) where
-  fmap :: (o -> o') -> Channel m a i o -> Channel m a i o'
-  fmap = rmap
-
-instance (Monad m) => Profunctor (Channel m a) where
-  dimap :: (i' -> i) -> (o -> o') -> Channel m a i o -> Channel m a i' o'
-  dimap fi fo (Channel chan) = Channel $ transFreeT go chan
-    where
-      go (Input next) = Input (next . fi)
-      go (Output o next) = Output (fo o) next
-
-instance (Monad m) => Filterable (Channel m a i) where
-  mapMaybe :: (o -> Maybe o') -> Channel m a i o -> Channel m a i o'
-  mapMaybe p = onChan (runChanT go)
-    where
-      go (Pure a) = pure' a
-      go (InputF next) = input' $ runChanT go next
-      go (OutputF o next) = case p o of
-        Just o' -> output' o' $ runChanT go next
-        Nothing -> runChanT go next
-
--- https://hackage.haskell.org/package/base-4.21.0.0/docs/Control-Arrow.html
-
--- (^>>) :: Arrow a => (b -> c) -> a c d -> a b d
--- (>>^) :: Arrow a => a b c -> (c -> d) -> a b d
-
-(>|>) :: (Filterable f) => f a -> (a -> Bool) -> f a
-(>|>) = flip Witherable.filter
-
-(>>|) :: (Filterable f) => f a -> (a -> Maybe b) -> f b
-(>>|) = flip mapMaybe
-
--- https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Choice.html
--- https://hackage-content.haskell.org/package/profunctors-5.6.3/docs/Data-Profunctor-Strong.html
-
-data Merge s a b o = Merge
-  { initialState :: s,
-    getState :: o -> s,
-    inputA :: s -> a -> o,
-    inputB :: s -> b -> o
-  }
-
-statelessMerge :: (a -> o) -> (b -> o) -> Merge () a b o
-statelessMerge fa fb =
-  Merge
-    { initialState = (),
-      getState = const (),
-      inputA = const fa,
-      inputB = const fb
-    }
-
-sumMerge :: Merge () a b (Either a b)
-sumMerge = statelessMerge Left Right
-
-appendMerge :: Merge () a a a
-appendMerge = statelessMerge id id
-
-productMerge :: a -> b -> Merge (a, b) a b (a, b)
-productMerge initA initB =
-  Merge
-    { initialState = (initA, initB),
-      getState = id,
-      inputA = flip (,) . snd,
-      inputB = (,) . fst
-    }
-
-monoidMerge :: (Monoid a, Monoid b) => Merge (a, b) a b (a, b)
-monoidMerge = productMerge mempty mempty
-
--- Runners
-runChannel :: (Monad m) => m i -> (o -> m ()) -> Channel m a i o -> m a
-runChannel get put (Channel chan) = iterT go chan
-  where
-    go (Input next) = get >>= next
-    go (Output o next) = put o >> next
-
-runProgram :: (Monad m) => Program m a -> m a
-runProgram = runChannel (error "Can't input Void") (error "Can't output Void")
-
--- Main program
-
-fiveProducer :: IOProducer Int
-fiveProducer = Channel $ do
-  output 1
-  lift $ threadDelay 1000000
-  output 2
-  lift $ threadDelay 1000000
-  output 3
-  lift $ threadDelay 1000000
-  output 4
-  lift $ threadDelay 1000000
-  output 5
-
-fibProducer :: IOProducer Int
-fibProducer = Channel $ go 0 1
-  where
-    go a b = do
-      output a
-      lift $ threadDelay 1000000
-      go b (a + b)
-
-randomProducer :: IOProducer Int
-randomProducer = Channel $ forever $ do
-  n <- lift $ randomRIO (0, 999)
-  output n
-  lift $ threadDelay 1000000
-
-printer :: (Show s) => IOConsumer s
-printer = Channel $ forever $ do
-  s <- input
-  lift $ print s
-
-runner :: IOConsumer (IO ())
-runner = Channel $ forever $ lift =<< input
+secondaryMouse :: String -> String
+secondaryMouse "P520" = trackpad "P520"
+secondaryMouse "T420" = trackpoint "T420"
+secondaryMouse "X201" = trackpoint "X201"
+secondaryMouse hostname = error $ "No secondary mouse defined for " <> hostname
 
 main :: IO ()
-main = runProgram $ fibProducer >>> printer
--}
+main =
+  cli $ do
+    hostname <- liftIO getHostName
+    let keyboardDevice = keyboard hostname
+    let secondaryMouseDevice = secondaryMouse hostname
+
+    deviceSource keyboardDevice True
+      <&> mapKeyCodes swapAZ
+      >>= withPersistentState "countA" 0 countA
+      >>= deviceSink "interfaceweaver"
+
+    deviceSource secondaryMouseDevice False
+      >>= liftIO . sink print
+
+swapAZ :: Codes.Key -> Codes.Key
+swapAZ Codes.KeyA = Codes.KeyZ
+swapAZ Codes.KeyZ = Codes.KeyA
+swapAZ kc = kc
+
+countA :: (Evdev.EventData, Int) -> (Evdev.EventData, Int)
+countA (event@(Evdev.KeyEvent Codes.KeyA _), state) = (event, state + 1)
+countA (event, state) = (event, state)

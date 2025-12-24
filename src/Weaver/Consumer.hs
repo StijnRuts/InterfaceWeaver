@@ -7,9 +7,11 @@ import Data.Functor.Contravariant
 data Consumer m a i
   = Pure a
   | Lift (m (Consumer m a i))
-  | Await (i -> (Consumer m a i))
+  | Await (i -> Consumer m a i)
 
-runConsumer :: (Monad m) => (m i) -> Consumer m a i -> m a
+-- TODO rename a to r and b to r'
+
+runConsumer :: (Monad m) => m i -> Consumer m a i -> m a
 runConsumer _ (Pure a) = pure a
 runConsumer get (Lift mnext) = mnext >>= runConsumer get
 runConsumer get (Await inext) = runConsumer get . inext =<< get
@@ -51,7 +53,7 @@ class Contrabivariant p where
   {-# INLINE cfirst #-}
 
   csecond :: (d -> c) -> p a c -> p a d
-  csecond g = cbimap id g
+  csecond = cbimap id
   {-# INLINE csecond #-}
 
 ---------------------------------------------------------
@@ -62,17 +64,20 @@ instance (Functor m) => Contrabivariant (Consumer m) where
   cbimap f g (Lift mnext) = Lift $ cbimap f g <$> mnext
   cbimap f g (Await inext) = Await $ cbimap f g . inext . g
 
+-- TODO
 -- class Functor f <= Apply f where
 --   apply :: ∀ a b. f (a -> b) -> f a -> f b
 -- class Apply f <= Applicative f where
 --   pure :: ∀ a. a -> f a
 
 {-
+-- TODO
 Data.Functor.Monoidal
   -- https://hackage.haskell.org/package/monoidal-functors-0.2.3.0
   ConsumerT m r i1 |&| ConsumerT m r i2 = ConsumerT m r (These i1 i2)
   ConsumerT m r i1 |+| ConsumerT m r i2 = ConsumerT m r (Either i1 i2)
   ConsumerT m r i1 |*| ConsumerT m r i2 = ConsumerT m r (i1, i2)
 
+-- TODO
 Coroutine / Cont ??
 -}

@@ -61,7 +61,7 @@ instance Category Channel where
   Channel oChan . Channel iChan = Channel $ do
     oRec <- oChan
     iRec <- iChan
-    (subscribe iRec) (push oRec)
+    subscribe iRec (push oRec)
     return ChannelImpl {subscribe = subscribe oRec, push = push iRec}
 
 instance Arrow Channel where
@@ -87,7 +87,7 @@ instance Arrow Channel where
               o1 <- readIORef o1Ref
               writeIORef o2Ref o2
               listener (o1, o2),
-          push = \(i1, i2) -> (push lRec i1) >> (push rRec i2)
+          push = \(i1, i2) -> push lRec i1 >> push rRec i2
         }
 
 {-

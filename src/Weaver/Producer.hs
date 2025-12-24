@@ -3,11 +3,20 @@ module Weaver.Producer where
 import Data.Bifunctor
 import Data.Functor ((<&>))
 
+{-
+data FlipFreeT m a f
+  = Pure a
+  | Lift (m (FlipFreeT m a f))
+  | Free (f (FlipFreeT m a f))
+-}
+
 -- TODO unify with Consumer into a FreeT like type
 data Producer m a o
   = Pure a
   | Lift (m (Producer m a o))
   | Yield o (Producer m a o)
+
+-- TODO rename a to r and b to r'
 
 runProducer :: (Monad m) => (o -> m ()) -> Producer m a o -> m a
 runProducer _ (Pure a) = pure a
@@ -44,12 +53,14 @@ instance (Functor m) => Bifunctor (Producer m) where
   bimap f g (Lift mnext) = Lift $ bimap f g <$> mnext
   bimap f g (Yield o next) = Yield (g o) $ bimap f g next
 
+-- TODO
 -- class Functor f <= Apply f where
 --   apply :: ∀ a b. f (a -> b) -> f a -> f b
 -- class Apply f <= Applicative f where
 --   pure :: ∀ a. a -> f a
 
 {-
+-- TODO
 Data.Functor.Monoidal
   ProducerT m r o1 |&| ProducerT m r o2 = ProducerT m r (These o1 o2)
   ProducerT m r o1 |+| ProducerT m r o2 = ProducerT m r (Either o1 o2)
@@ -60,5 +71,6 @@ Data.Functor.Monoidal
   -- race :: m a -> m b -> m (Either a b)
   -- concurrently :: m a -> m b -> m (a, b)
 
+-- TODO
 Coroutine / Cont ??
 -}
