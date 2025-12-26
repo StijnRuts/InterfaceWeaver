@@ -4,11 +4,13 @@
     enable = true;
     package = pkgs.haskell.packages.ghc9103.ghcWithPackages (ps: with ps; [
       aeson
+      conduit
       data-default
       evdev
       free
       hspec
       network-bsd
+      optics-core
       witherable
       QuickCheck
     ]);

@@ -4,6 +4,42 @@ import Data.Bifunctor
 import Data.Functor ((<&>))
 import Data.Functor.Contravariant
 
+Cofree
+Contrafree
+Polyfree
+
+data FooFree f a m r
+  = Pure r
+  | Lift (m (FooFree f a m r))
+  | Free (f a (FooFree f a m r))
+
+data FreeT f m a = FreeT { runFreeT :: m (FreeF f a (FreeT f m a)) }
+
+data ProducerF o next = Yield o next
+type Producer = Polyfree ProducerF
+Cocopolyfunctor
+
+data ConsumerF i next = Await (i -> next)
+type Consumer = Polyfree ConsumerF
+Contracopolyfunctor
+
+
+Cofree :+: Contrafree
+data Arrowfree i o = i (:->:) o
+
+type ChannnelF i o = ConsumerF i :->: ProducerF o
+Channel =  Arrowfree ChannnelF
+
+cohoist :: (o -> o') -> F o m r -> F o' m r
+contrahoist :: (i' -> i) -> F i m r -> F i' m r
+cocontrahoist :: (i' -> i) -> (o -> o') -> F i o m r -> F i' o' m r
+hoistl
+hoistr
+
+something :: F a m r -> F a m r -> F c m r
+
+
+
 {-
 -- TODO
 

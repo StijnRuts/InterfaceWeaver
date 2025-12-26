@@ -4,20 +4,18 @@ import Data.Bifunctor
 import Data.Functor ((<&>))
 
 -- TODO Rewrite to FreeT
-data Producer m a o
-  = Pure a
-  | Lift (m (Producer m a o))
-  | Yield o (Producer m a o)
+data Producer m r o
+  = Pure r
+  | Lift (m (Producer m r o))
+  | Yield o (Producer m r o)
 
--- TODO rename a to r and b to r'
-
-runProducer :: (Monad m) => (o -> m ()) -> Producer m a o -> m a
-runProducer _ (Pure a) = pure a
+runProducer :: (Monad m) => (o -> m ()) -> Producer m r o -> m r
+runProducer _ (Pure r) = pure r
 runProducer put (Lift mnext) = mnext >>= runProducer put
 runProducer put (Yield o next) = put o >> runProducer put next
 
-instance (Applicative m, Semigroup a) => Semigroup (Producer m a o) where
-  (<>) :: Producer m a o -> Producer m a o -> Producer m a o
+instance (Applicative m, Semigroup r) => Semigroup (Producer m r o) where
+  (<>) :: Producer m r o -> Producer m r o -> Producer m r o
 {- ORMOLU_DISABLE -}
   Pure r1        <> Pure r2        = Pure $ r1 <> r2
   Pure r1        <> Lift mnext2    = Lift $ (Pure r1 <>) <$> mnext2
@@ -30,19 +28,19 @@ instance (Applicative m, Semigroup a) => Semigroup (Producer m a o) where
   Yield o1 next1 <> Yield o2 next2 = Yield o1 $ Yield o2 $ next1 <> next2
 {- ORMOLU_ENABLE -}
 
-instance (Applicative m, Monoid a) => Monoid (Producer m a o) where
-  mempty :: Producer m a o
+instance (Applicative m, Monoid r) => Monoid (Producer m r o) where
+  mempty :: Producer m r o
   mempty = Pure mempty
 
-instance (Functor m) => Functor (Producer m a) where
-  fmap :: (o -> o') -> Producer m a o -> Producer m a o'
-  fmap _ (Pure a) = Pure a
+instance (Functor m) => Functor (Producer m r) where
+  fmap :: (o -> o') -> Producer m r o -> Producer m r o'
+  fmap _ (Pure r) = Pure r
   fmap f (Lift mnext) = Lift $ fmap f <$> mnext
   fmap f (Yield o next) = Yield (f o) $ fmap f next
 
 instance (Functor m) => Bifunctor (Producer m) where
-  bimap :: (a -> b) -> (o -> o') -> Producer m a o -> Producer m b o'
-  bimap f _ (Pure a) = Pure (f a)
+  bimap :: (r -> r') -> (o -> o') -> Producer m r o -> Producer m r' o'
+  bimap f _ (Pure r) = Pure (f r)
   bimap f g (Lift mnext) = Lift $ bimap f g <$> mnext
   bimap f g (Yield o next) = Yield (g o) $ bimap f g next
 
